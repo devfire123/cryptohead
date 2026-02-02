@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Blog | Axiom Vale</title>
+    <meta
+      name="description"
+      content="Technical blog on cryptography intuition, pwn techniques, and reverse engineering workflows."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a class="active" href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="page-hero">
+          <div>
+            <p class="eyebrow">Blog</p>
+            <h1>Pwn, crypto, and reversing without the fluff.</h1>
+            <p class="lede">
+              Short, structured posts with concrete techniques, failure modes, and reusable
+              checklists.
+            </p>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="grid cards">
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Pwn</p>
+                <h3>Ret2win on weird ABIs: what actually breaks</h3>
+                <p>How $t9/$gp, PIC, and calling conventions turn easy wins into crashes.</p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">pwn · abi</span>
+                <a class="arrow" href="blog-pwn-abi.html">Read ?</a>
+              </div>
+            </article>
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Crypto</p>
+                <h3>Lattice attacks without the black box</h3>
+                <p>Parameter intuition, failure modes, and a minimal LLL workflow.</p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">crypto · lattice</span>
+                <a class="arrow" href="blog-crypto-lattices.html">Read ?</a>
+              </div>
+            </article>
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Reversing</p>
+                <h3>VM reversing: keep the math small</h3>
+                <p>Build an executable spec and invert the pipeline step-by-step.</p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">rev · vm</span>
+                <a class="arrow" href="blog-rev-vm.html">Read ?</a>
+              </div>
+            </article>
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Crypto</p>
+                <h3>Encoding chains: a disciplined approach</h3>
+                <p>Detect layers with tests, not guesses, and keep a decode trail.</p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">crypto · misc</span>
+                <a class="arrow" href="blog-encoding-chains.html">Read ?</a>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

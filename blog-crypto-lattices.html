@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lattice attacks without the black box | Axiom Vale</title>
+    <meta
+      name="description"
+      content="Practical intuition for lattice-based attacks: parameters, failure modes, and a minimal LLL workflow."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a class="active" href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="writeup-hero">
+          <div>
+            <p class="eyebrow">Crypto</p>
+            <h1>Lattice attacks without the black box</h1>
+            <p class="lede">
+              A practical way to reason about LLL-based attacks so you are not guessing at
+              parameters or output vectors.
+            </p>
+          </div>
+          <div class="writeup-meta">
+            <span class="tag">crypto</span>
+            <span class="tag">lattice</span>
+          </div>
+        </section>
+
+        <section class="prose-card">
+          <div class="prose">
+            <h3>What you are trying to do</h3>
+            <p>
+              Most CTF lattice problems reduce to: build a basis where the vector encoding the
+              secret is unusually short, then use LLL to surface it. The art is choosing
+              scaling so the secret vector is short relative to everything else.
+            </p>
+
+            <h3>Three knobs that matter</h3>
+            <ul>
+              <li><strong>Scaling:</strong> how you weight different constraints.</li>
+              <li><strong>Dimension:</strong> more rows help, but can drown the signal.</li>
+              <li><strong>Bounds:</strong> your hidden value size determines the target length.</li>
+            </ul>
+
+            <h3>Minimal workflow (no magic)</h3>
+            <ol>
+              <li>Write the relation you want to hold as a linear equation.</li>
+              <li>Move unknowns to one side, knowns to the other.</li>
+              <li>Build a matrix so the unknowns correspond to a short vector.</li>
+              <li>Scale columns so all coordinates are roughly same magnitude.</li>
+              <li>Run LLL and inspect the short vectors for a valid candidate.</li>
+            </ol>
+
+            <h3>How to sanity-check your basis</h3>
+            <p>
+              Before running LLL, estimate the target vector length. If your shortest basis
+              vector is already smaller than that estimate, your scaling is off. If the target
+              is much shorter than all basis vectors, LLL has a chance. If not, change scaling
+              or add constraints.
+            </p>
+
+            <h3>Common failure modes</h3>
+            <ul>
+              <li>Bad scaling: one coordinate dominates and hides the signal.</li>
+              <li>Too many rows: the target gets buried under noise.</li>
+              <li>Wrong bound: your "short" vector is not actually short.</li>
+            </ul>
+
+            <h3>Quick heuristic</h3>
+            <p>
+              Try multiple scalings (powers of two). If one gives you a vector where the
+              candidate secret matches the expected bound, you are done. If none do, re-check
+              the equation itself before blaming LLL.
+            </p>
+
+            <h3>Takeaway</h3>
+            <p>
+              Lattices are not a black box. You are encoding a story about the secret being
+              short. Make that story true by scaling, and LLL will do the rest.
+            </p>
+          </div>
+        </section>
+
+        <section class="writeup-nav">
+          <a class="secondary" href="blog.html">? Back to blog</a>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

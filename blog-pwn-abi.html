@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ret2win on weird ABIs | Axiom Vale</title>
+    <meta
+      name="description"
+      content="A practical checklist for ret2win on non-x86 ABIs: what breaks and how to fix it."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a class="active" href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="writeup-hero">
+          <div>
+            <p class="eyebrow">Pwn</p>
+            <h1>Ret2win on weird ABIs: what actually breaks</h1>
+            <p class="lede">
+              When ret2win fails on MIPS, ARM, or PPC, it usually is not the return address.
+              It is the ABI contract you forgot to satisfy.
+            </p>
+          </div>
+          <div class="writeup-meta">
+            <span class="tag">pwn</span>
+            <span class="tag">abi</span>
+          </div>
+        </section>
+
+        <section class="prose-card">
+          <div class="prose">
+            <h3>Why easy ret2win crashes</h3>
+            <p>
+              On x86_64, you can often drop straight into a win function and it will just work.
+              On other ABIs, the function prologue expects hidden state to be set: register
+              pairs, a global pointer, or a TOC base. If that state is wrong, you crash after
+              a couple of instructions and it looks like "wrong address," when it is actually
+              "wrong calling context."
+            </p>
+
+            <h3>Three common contracts</h3>
+            <ul>
+              <li><strong>MIPS PIC:</strong> $t9 must hold the target function address so $gp can be derived.</li>
+              <li><strong>PowerPC:</strong> the TOC pointer in r2 must be valid for global accesses.</li>
+              <li><strong>ARM:</strong> the LSB of the branch target selects ARM vs Thumb.</li>
+            </ul>
+
+            <h3>Minimal checklist (before you blame offsets)</h3>
+            <ol>
+              <li>Confirm the target is PIC or non-PIC (look for $gp, r2/TOC, GOT loads).</li>
+              <li>Identify the register used to compute globals (e.g., $t9 on MIPS).</li>
+              <li>Find a gadget that restores the expected register from the stack.</li>
+              <li>Place the real target where the gadget will load it from.</li>
+              <li>Verify the stack pointer at gadget entry (ABI usually assumes 16-byte alignment).</li>
+            </ol>
+
+            <h3>MIPS example (pattern)</h3>
+            <pre><code class="language-text">gadget:
+  ld   $t9, 0x28($sp)
+  jalr $t9
+
+stack layout:
+  [padding]
+  [gadget @ $ra]
+  [..]
+  [print_flag @ $sp+0x28]</code></pre>
+
+            <h3>Debugging tip</h3>
+            <p>
+              If your target crashes on its first global access (e.g., lw from $gp-relative
+              address), step into the prologue and check the register used to compute globals.
+              If that value is wrong, fix it first. This is faster than re-checking offsets.
+            </p>
+
+            <h3>Takeaway</h3>
+            <p>
+              Ret2win on non-x86 is about reconstructing the ABI contract. The return address
+              is only one part of the call. The register context is the rest.
+            </p>
+          </div>
+        </section>
+
+        <section class="writeup-nav">
+          <a class="secondary" href="blog.html">? Back to blog</a>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

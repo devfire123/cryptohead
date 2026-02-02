@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CTF Writeups | Axiom Vale</title>
+    <meta
+      name="description"
+      content="Crypto and misc CTF writeups with proofs, diagrams, and scripts."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a class="active" href="writeups.html">Writeups</a>
+          <a href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="page-hero">
+          <div>
+            <p class="eyebrow">Writeups</p>
+            <h1>Eschaton CTF 2026 Quals.</h1>
+            <p class="lede">
+              Full writeups with clean problem summaries, math, and reproducible scripts.
+            </p>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="grid cards">
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Eschaton CTF 2026 Quals</p>
+                <h3>Couple Gallery (Android)</h3>
+                <p>
+                  Hermes bytecode reverse + AES key extraction to decrypt images from a bundled
+                  SQLite DB.
+                </p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">misc · android</span>
+                <a class="arrow" href="writeup-couple-gallery.html">Read ?</a>
+              </div>
+            </article>
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Eschaton CTF 2026 Quals</p>
+                <h3>Temporal Rift (MIPS64)</h3>
+                <p>
+                  ret2win using a $t9/$gp-safe gadget to satisfy MIPS PIC.
+                </p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">pwn · mips64</span>
+                <a class="arrow" href="writeup-temporal-rift.html">Read ?</a>
+              </div>
+            </article>
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Eschaton CTF 2026 Quals</p>
+                <h3>VM (Reversing)</h3>
+                <p>
+                  Invert a custom VM cipher by reversing S-box, permute, and linear mix steps.
+                </p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">rev · vm</span>
+                <a class="arrow" href="writeup-vm.html">Read ?</a>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

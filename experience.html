@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Experience | Axiom Vale</title>
+    <meta
+      name="description"
+      content="Security experience, skills, and certifications with a crypto/misc focus."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="page-hero">
+          <div>
+            <p class="eyebrow">Experience</p>
+            <h1>Security work grounded in crypto and tooling.</h1>
+            <p class="lede">
+              Research, training, and engineering that turns theoretical ideas into practical
+              outcomes.
+            </p>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="grid split">
+            <div class="experience">
+              <h3>Security Researcher · Company Name</h3>
+              <p class="muted">2023 — Present</p>
+              <ul>
+                <li>Built crypto challenge kits for internal training and CTFs.</li>
+                <li>Authored solver templates and proof-driven writeups.</li>
+                <li>Coached teams on cryptanalysis and stego methodologies.</li>
+              </ul>
+            </div>
+            <div class="experience">
+              <h3>Security Analyst · Company Name</h3>
+              <p class="muted">2020 — 2023</p>
+              <ul>
+                <li>Automated forensics workflows for file and packet analysis.</li>
+                <li>Wrote parsers for bespoke data formats and malware configs.</li>
+                <li>Shipped internal tools used in incident response pipelines.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <h2>Skills & Certifications</h2>
+            <p>Math-driven security work backed by clean engineering.</p>
+          </div>
+          <div class="grid skills">
+            <div class="skill-card">
+              <h3>Cryptography</h3>
+              <p>RSA, ECC, lattices · protocol analysis · proofs</p>
+            </div>
+            <div class="skill-card">
+              <h3>Misc / Forensics</h3>
+              <p>Stego chains · file carving · custom format parsing</p>
+            </div>
+            <div class="skill-card">
+              <h3>Engineering</h3>
+              <p>Python, SageMath · z3 modeling · automation</p>
+            </div>
+            <div class="skill-card">
+              <h3>Certifications</h3>
+              <p>OSCP · GCIA · (replace with yours)</p>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

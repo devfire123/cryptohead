@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VM reversing: keep the math small | Axiom Vale</title>
+    <meta
+      name="description"
+      content="A structured approach to reversing custom VMs: executable specs, inversion, and checks."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a class="active" href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="writeup-hero">
+          <div>
+            <p class="eyebrow">Reversing</p>
+            <h1>VM reversing: keep the math small</h1>
+            <p class="lede">
+              The fastest path is not a full emulator. Build an executable spec, then invert
+              each stage with tests.
+            </p>
+          </div>
+          <div class="writeup-meta">
+            <span class="tag">rev</span>
+            <span class="tag">vm</span>
+          </div>
+        </section>
+
+        <section class="prose-card">
+          <div class="prose">
+            <h3>Step 1: Extract the constants first</h3>
+            <p>
+              Most custom VMs hide their constants in a decrypt stage. Emulate only that stage
+              to recover S-boxes, permutations, round keys, and target blocks. This reduces the
+              problem to pure math.
+            </p>
+
+            <h3>Step 2: Build a tiny forward model</h3>
+            <p>
+              Write a 20-line forward model for one round. Feed it known inputs and check that
+              it reproduces the VM output for that round. If it matches, you now have a clean,
+              controllable spec.
+            </p>
+
+            <h3>Step 3: Invert one transform at a time</h3>
+            <ul>
+              <li>Inverting XOR: XOR again.</li>
+              <li>Inverting rotation: rotate the other way.</li>
+              <li>Inverting permute: build the inverse permutation table.</li>
+              <li>Inverting mix: treat it as a linear map and invert with Gaussian elimination.</li>
+            </ul>
+
+            <h3>Step 4: Add verification</h3>
+            <p>
+              After you build the inverse pipeline, run a quick forward check. If forward(inverse(x))
+              does not equal x, fix the earliest stage that fails. This saves hours of guesswork.
+            </p>
+
+            <h3>Minimal test harness</h3>
+            <pre><code class="language-python">def round_trip(inp):
+    out = forward(inp)
+    back = inverse(out)
+    return back == inp
+
+for _ in range(1000):
+    inp = os.urandom(8)
+    assert round_trip(inp)</code></pre>
+
+            <h3>Takeaway</h3>
+            <p>
+              You do not need a full emulator to solve VM challenges. You need a correct model
+              of the round function and a clean inverse. Keep the math small and the feedback
+              tight.
+            </p>
+          </div>
+        </section>
+
+        <section class="writeup-nav">
+          <a class="secondary" href="blog.html">? Back to blog</a>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

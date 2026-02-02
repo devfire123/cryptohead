@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VM (Reversing) | Axiom Vale</title>
+    <meta
+      name="description"
+      content="Eschaton CTF 2026 Quals writeup: VM (Reversing)."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="writeup-hero">
+          <div>
+            <p class="eyebrow">Eschaton CTF 2026 Quals</p>
+            <h1>VM (Reversing)</h1>
+            <p class="lede">
+              Invert a custom VM cipher by reversing S-box, permute, and linear mix steps.
+            </p>
+          </div>
+          <div class="writeup-meta">
+            <span class="tag">rev</span>
+            <span class="tag">vm</span>
+          </div>
+        </section>
+
+        <section class="prose-card">
+          <div class="prose">
+            <h3>Overview</h3>
+            <p>
+              A custom VM reads 16 input bytes, runs 4 rounds of S-box/XOR/ROL/permute/mix on
+              two 8-byte blocks, compares against a target block, and if correct decrypts and
+              prints the flag.
+            </p>
+
+            <h3>Recon</h3>
+            <ul>
+              <li>file: vm, binary.bin</li>
+              <li>arch: vm is ELF x86_64; bytecode in binary.bin</li>
+              <li>protections: standard (no impact); logic is in bytecode</li>
+              <li>bytecode starts with a decrypt stage that initializes constants</li>
+            </ul>
+
+            <h3>Vulnerability</h3>
+            <p>
+              Not a memory bug: this is a reversible transformation. The "exploit" is
+              inverting the VM cipher to recover the required input.
+            </p>
+
+            <h3>Exploit Plan</h3>
+            <ol>
+              <li>Emulate the decrypt stage to recover S-box, round keys, rotations, permute table, target, and encrypted flag.</li>
+              <li>Invert each round (inverse mix -> inverse permute -> inverse ROL -> XOR key -> inverse S-box).</li>
+              <li>XOR input with encrypted flag to obtain the plaintext flag.</li>
+            </ol>
+
+            <h3>Exploit</h3>
+            <pre><code class="language-python">#!/usr/bin/env python3
+from pathlib import Path
+
+bytecode = Path('binary.bin').read_bytes()
+
+OP = {0x00:'nop',0x01:'push',0x02:'pop',0x03:'dup',0x04:'swap',0x10:'add',0x11:'sub',0x12:'xor',0x13:'and',0x14:'or',0x15:'rol',0x16:'ror',0x17:'not',0x20:'load',0x21:'store',0x22:'load16',0x23:'store16',0x24:'push16',0x30:'jump',0x31:'jz',0x32:'jnz',0x33:'call',0x34:'ret',0x3f:'halt',0x40:'sbox',0x41:'permute',0x42:'decrypt',0x50:'print',0x51:'printmem',0x52:'input',0x60:'cmp',0x61:'cmpmem'}
+
+
+def decrypt_stage():
+    mem = [0] * 0x900
+    stack = []
+    ip = 0
+
+    def fetch():
+        nonlocal ip
+        b = bytecode[ip]; ip += 1
+        return b
+
+    def fetchw():
+        lo = fetch(); hi = fetch()
+        return lo | (hi << 8)
+
+    def decrypt():
+        key = stack.pop(); length = stack.pop()
+        if length == 0:
+            length = 0x100
+        dst_lo = stack.pop(); dst_hi = stack.pop()
+        src_lo = stack.pop(); src_hi = stack.pop()
+        src = (src_hi << 8) | src_lo
+        dst = (dst_hi << 8) | dst_lo
+        for i in range(length):
+            mem[0x100 + dst + i] = bytecode[src + i] ^ key
+
+    while True:
+        op = fetch(); name = OP.get(op, op)
+        if name == 'push':
+            stack.append(fetch())
+        elif name == 'push16':
+            w = fetchw(); stack.append((w >> 8) & 0xff); stack.append(w & 0xff)
+        elif name == 'decrypt':
+            decrypt()
+        elif name == 'input':
+            break
+        elif name == 'jump':
+            ip = fetchw()
+        elif name == 'halt':
+            break
+
+    return mem, ip
+
+
+def rol8(x, n):
+    n &= 7
+    return ((x << n) | (x >> (8 - n))) & 0xff
+
+
+def ror8(x, n):
+    n &= 7
+    return ((x >> n) | (x << (8 - n))) & 0xff
+
+
+def permute_block(b, perm):
+    return [b[perm[i] & 7] for i in range(8)]
+
+
+def inv_permute_block(b, perm):
+    out = [0] * 8
+    for i in range(8):
+        out[perm[i] & 7] = b[i]
+    return out
+
+
+def mix_block(b):
+    b0,b1,b2,b3,b4,b5,b6,b7 = b
+    o0 = b0 ^ rol8(b1,1) ^ b3
+    o1 = b1 ^ rol8(b2,2) ^ b4
+    o2 = b2 ^ rol8(b3,3) ^ b5
+    o3 = b3 ^ rol8(b4,4) ^ b6
+    o4 = b4 ^ rol8(b5,5) ^ b7
+    o5 = b5 ^ rol8(b6,6) ^ b0
+    o6 = b6 ^ rol8(b7,7) ^ b1
+    o7 = b7 ^ rol8(b0,8) ^ b2
+    return [o0,o1,o2,o3,o4,o5,o6,o7]
+
+
+def build_inv_mix():
+    def bytes_to_bits64(b):
+        v = 0
+        for i in range(8):
+            v |= (b[i] & 0xff) << (8 * i)
+        return v
+
+    def bits64_to_bytes(v):
+        return [(v >> (8 * i)) & 0xff for i in range(8)]
+
+    rows = [0] * 64
+    for i in range(64):
+        inp_bits = 1 << i
+        out_bytes = mix_block(bits64_to_bytes(inp_bits))
+        out_bits = bytes_to_bits64(out_bytes)
+        for j in range(64):
+            if (out_bits >> j) & 1:
+                rows[j] |= 1 << i
+
+    aug = [rows[r] | (1 << (64 + r)) for r in range(64)]
+    for col in range(64):
+        pivot = None
+        for r in range(col, 64):
+            if (aug[r] >> col) & 1:
+                pivot = r
+                break
+        if pivot is None:
+            raise RuntimeError('mix matrix not invertible')
+        if pivot != col:
+            aug[col], aug[pivot] = aug[pivot], aug[col]
+        for r in range(64):
+            if r != col and ((aug[r] >> col) & 1):
+                aug[r] ^= aug[col]
+
+    inv_rows = [(row >> 64) & ((1 << 64) - 1) for row in aug]
+    return inv_rows
+
+
+INV_MIX_ROWS = build_inv_mix()
+
+
+def inv_mix_block(b):
+    def bytes_to_bits64(b):
+        v = 0
+        for i in range(8):
+            v |= (b[i] & 0xff) << (8 * i)
+        return v
+
+    def bits64_to_bytes(v):
+        return [(v >> (8 * i)) & 0xff for i in range(8)]
+
+    out_bits = bytes_to_bits64(b)
+    in_bits = 0
+    for i in range(64):
+        row = INV_MIX_ROWS[i]
+        parity = bin(row & out_bits).count('1') & 1
+        if parity:
+            in_bits |= 1 << i
+    return bits64_to_bytes(in_bits)
+
+
+def inverse_block(final_block, sbox_inv, round_keys, round_rots, perm):
+    b = final_block[:]
+    for rnd in reversed(range(4)):
+        b = inv_mix_block(b)
+        b = inv_permute_block(b, perm)
+        for i in range(8):
+            b[i] = ror8(b[i], round_rots[rnd][i])
+        for i in range(8):
+            b[i] ^= round_keys[rnd][i]
+        for i in range(8):
+            b[i] = sbox_inv[b[i]]
+    return b
+
+
+def forward_block(inp_block, sbox, round_keys, round_rots, perm):
+    b = inp_block[:]
+    for rnd in range(4):
+        b = [sbox[x] for x in b]
+        for i in range(8):
+            b[i] ^= round_keys[rnd][i]
+        for i in range(8):
+            b[i] = rol8(b[i], round_rots[rnd][i])
+        b = permute_block(b, perm)
+        b = mix_block(b)
+    return b
+
+
+def main():
+    mem, _ = decrypt_stage()
+
+    sbox = mem[0x500:0x600]
+    sbox_inv = [0] * 256
+    for i, v in enumerate(sbox):
+        sbox_inv[v] = i
+
+    perm = mem[0x600:0x608]
+
+    round_keys = []
+    round_rots = []
+    for rnd in range(4):
+        round_keys.append(mem[0x100 + 0x20 + 8*rnd:0x100 + 0x20 + 8*(rnd+1)])
+        round_rots.append(mem[0x100 + 0x40 + 8*rnd:0x100 + 0x40 + 8*(rnd+1)])
+
+    target = mem[0x100 + 0x700:0x100 + 0x710]
+    block0 = target[:8]
+    block1 = target[8:]
+
+    inp0 = inverse_block(block0, sbox_inv, round_keys, round_rots, perm)
+    inp1 = inverse_block(block1, sbox_inv, round_keys, round_rots, perm)
+    inp = bytes(inp0 + inp1)
+
+    chk0 = forward_block(list(inp0), sbox, round_keys, round_rots, perm)
+    chk1 = forward_block(list(inp1), sbox, round_keys, round_rots, perm)
+    if chk0 + chk1 != target:
+        raise RuntimeError('forward check failed')
+
+    enc_flag = mem[0x100 + 0x600:0x100 + 0x600 + 0x24]
+    flag = bytes([enc_flag[i] ^ inp[i % 16] for i in range(len(enc_flag))])
+
+    print('input', inp.hex())
+    print('flag', flag)
+
+
+if __name__ == '__main__':
+    main()</code></pre>
+
+            <h3>Result</h3>
+            <p>Flag: esch{br0k3_th3_vm_4ndd_th3_c1pher!!}</p>
+
+            <h3>Summary</h3>
+            <p>
+              This is a reversible VM cipher. Decrypt the bytecode constants, invert the round
+              function, and recover the exact 16-byte input to reveal the flag.
+            </p>
+          </div>
+        </section>
+
+        <section class="writeup-nav">
+          <a class="secondary" href="writeups.html">? Back to writeups</a>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

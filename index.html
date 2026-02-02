@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Axiom Vale | Crypto & Misc CTF</title>
+    <meta
+      name="description"
+      content="Crypto and misc CTF writeups, technical blogs, and security projects by Axiom Vale."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a class="active" href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div class="hero-copy">
+            <p class="eyebrow">Crypto · Misc · Forensics · Logic</p>
+            <h1>
+              I solve challenges that demand
+              <span>structure, proofs, and patience.</span>
+            </h1>
+            <p class="lede">
+              I focus on crypto and misc CTFs, writing clean, reproducible solutions and
+              building tooling for hard problems.
+            </p>
+            <div class="hero-actions">
+              <a class="primary" href="writeups.html">Read writeups</a>
+              <a class="secondary" href="projects.html">See projects</a>
+            </div>
+            <div class="meta-grid">
+              <div>
+                <h3>Team</h3>
+                <p>Flagsomnia</p>
+              </div>
+              <div>
+                <h3>Event</h3>
+                <p>Eschaton CTF 2026 Quals</p>
+              </div>
+              <div>
+                <h3>Focus</h3>
+                <p>Crypto + Misc</p>
+              </div>
+            </div>
+          </div>
+          <div class="hero-panel">
+            <div class="panel">
+              <h3>Current Focus</h3>
+              <ul>
+                <li>Lattice attacks and reductions</li>
+                <li>Protocol parsing and weird formats</li>
+                <li>Forensics automation</li>
+              </ul>
+            </div>
+            <div class="panel">
+              <h3>Toolbox</h3>
+              <div class="chips">
+                <span>SageMath</span>
+                <span>z3</span>
+                <span>GMP</span>
+                <span>Python</span>
+                <span>pwntools</span>
+                <span>CyberChef</span>
+                <span>Wireshark</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="section-header">
+            <h2>Featured Writeups</h2>
+            <p>From Eschaton CTF 2026 Quals.</p>
+          </div>
+          <div class="grid cards">
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Eschaton CTF 2026 Quals</p>
+                <h3>Couple Gallery (Android)</h3>
+                <p>Hermes bytecode reverse + AES key extraction to decrypt images.</p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">misc · android</span>
+                <a class="arrow" href="writeup-couple-gallery.html">Read ?</a>
+              </div>
+            </article>
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Eschaton CTF 2026 Quals</p>
+                <h3>Temporal Rift (MIPS64)</h3>
+                <p>ret2win using a $t9/$gp-safe gadget to satisfy MIPS PIC.</p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">pwn · mips64</span>
+                <a class="arrow" href="writeup-temporal-rift.html">Read ?</a>
+              </div>
+            </article>
+            <article class="card card-link">
+              <div class="card-top">
+                <p class="event">Eschaton CTF 2026 Quals</p>
+                <h3>VM (Reversing)</h3>
+                <p>Invert a VM cipher by reversing S-box, permute, and mix steps.</p>
+              </div>
+              <div class="card-footer">
+                <span class="tag">rev · vm</span>
+                <a class="arrow" href="writeup-vm.html">Read ?</a>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

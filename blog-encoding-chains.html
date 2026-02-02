@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Encoding chains: a disciplined approach | Axiom Vale</title>
+    <meta
+      name="description"
+      content="A practical workflow for layered encodings: detection, ordering, and verification."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a class="active" href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="writeup-hero">
+          <div>
+            <p class="eyebrow">Crypto / Misc</p>
+            <h1>Encoding chains: a disciplined approach</h1>
+            <p class="lede">
+              A workflow for layered encodings that trades brute force for tests and traceable
+              evidence.
+            </p>
+          </div>
+          <div class="writeup-meta">
+            <span class="tag">crypto</span>
+            <span class="tag">misc</span>
+          </div>
+        </section>
+
+        <section class="prose-card">
+          <div class="prose">
+            <h3>Start with cheap signals</h3>
+            <ul>
+              <li>Character set: Base64, Base32, Base58, hex, URL-safe alphabet.</li>
+              <li>Length: multiples of 2/4/5/8 often hint at a specific encoding.</li>
+              <li>Entropy: very low or very high entropy should change your plan.</li>
+            </ul>
+
+            <h3>Test before you commit</h3>
+            <p>
+              Do not chain decoders blindly. Run a test decode, then inspect the output. If it
+              looks like structured bytes (magic bytes, JSON, ZIP, PNG), take that path. If it
+              turns to random noise, backtrack.
+            </p>
+
+            <h3>Keep a decode trail</h3>
+            <pre><code class="language-text">layer 0: base64
+layer 1: gzip
+layer 2: xor key=0x2a
+layer 3: base32</code></pre>
+
+            <h3>Common traps</h3>
+            <ul>
+              <li>Double-encoding with the same scheme (base64 twice).</li>
+              <li>Mixed alphabets (URL-safe base64 inside standard base64).</li>
+              <li>Padding removed; you need to restore it before decode.</li>
+            </ul>
+
+            <h3>Repeatable workflow</h3>
+            <ol>
+              <li>Run charset detection + length check.</li>
+              <li>Decode once and check magic bytes.</li>
+              <li>If bytes look structured, follow that format (e.g., gzip, zip, png).</li>
+              <li>If bytes look random, try a different encoding or check for XOR/ROT.</li>
+              <li>Document every layer so you can reproduce the chain.</li>
+            </ol>
+
+            <h3>Takeaway</h3>
+            <p>
+              Encoding chains are about evidence, not guesses. When you keep a traceable trail
+              and validate each step, you solve faster and can explain the solution cleanly.
+            </p>
+          </div>
+        </section>
+
+        <section class="writeup-nav">
+          <a class="secondary" href="blog.html">? Back to blog</a>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

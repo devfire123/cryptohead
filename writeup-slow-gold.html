@@ -61,16 +61,7 @@
               <figcaption>Solve proof screenshot.</figcaption>
             </figure>
 
-            <h3>Downloads</h3>
-            <div class="downloads">
-<a class="dl" href="artifacts/slow-gold/solve_slowgold.py" download><span class="dl-name">solve_slowgold.py</span><span class="dl-meta">6.8 KB</span></a>
-<a class="dl" href="artifacts/slow-gold/slowgold_probe.cpp" download><span class="dl-name">slowgold_probe.cpp</span><span class="dl-meta">2.2 KB</span></a>
-<a class="dl" href="artifacts/slow-gold/slowgold_submit.cpp" download><span class="dl-name">slowgold_submit.cpp</span><span class="dl-meta">2.5 KB</span></a>
-<a class="dl" href="artifacts/slow-gold/ostriple.h" download><span class="dl-name">ostriple.h</span><span class="dl-meta">9.7 KB</span></a>
-<a class="dl" href="crypto_slow-gold_writeup.txt" download><span class="dl-name">crypto_slow-gold_writeup.txt</span><span class="dl-meta">full notes</span></a>
-            </div>
-
-                        <h3>Writeup</h3>
+            <h3>Writeup</h3>
             <div class="layout">
               <aside class="toc">
                 <p class="toc-title">Contents</p>
@@ -79,18 +70,19 @@
                 <a href="#bug">Root Cause</a>
                 <a href="#leak">Turning The Leak Into Equations</a>
                 <a href="#poly">Interpolation + Factoring</a>
-                <a href="#submit">Submissions</a>
+                <a href="#submit">Submission</a>
                 <a href="#notes">Reliability Notes</a>
               </aside>
               <article class="article">
                 <section id="tl-dr" class="block">
                   <h4>TL;DR</h4>
                   <p>
-                    The verifier transcript leaks the last multiplication gate because the EMP-ZK
-                    batch check unintentionally checks only one gate. That leak gives a linear
-                    equation in <code>(a, b, p=a*b)</code>. Solve three transcripts per X, recover
-                    <code>a(X)</code> and <code>b(X)</code>, then: <code>v9 = b(X) - X</code>. The remaining 9 values
-                    fall out by interpolating <code>a(X)</code> as a degree-9 polynomial and factoring it.
+                    EMP-ZK's multiplication batch check is supposed to aggregate all multiplication
+                    gates. Due to an unsigned-index loop bug, only the last multiplication gate is
+                    checked, and the verifier transcript leaks a value that lets us recover that
+                    gate's internal wires as a function of the public challenge <code>X</code>. From there:
+                    <code>v9 = b(X) - X</code>, and the remaining 9 values come from interpolating
+                    <code>a(X)</code> and factoring it over <code>F_PR</code>.
                   </p>
                   <div class="callout">
                     <p class="callout-title">Flag</p>
@@ -101,15 +93,16 @@
                 <section id="protocol" class="block">
                   <h4>What The Protocol Proves</h4>
                   <p>
-                    The prover has two secret arrays of 10 field elements each. The verifier chooses
-                    a public challenge <code>X</code>. The circuit computes:
+                    The prover holds two secret arrays of 10 field elements. The verifier chooses
+                    a public challenge <code>X</code>. The circuit computes
+                    <code>acc1(X)</code> and <code>acc2(X)</code> and proves <code>acc1(X) == acc2(X)</code>:
                   </p>
                   <pre><code class="language-text">acc1(X) = prod_{i=0..9} (array1[i] + X)
 acc2(X) = prod_{i=0..9} (array2[i] + X)</code></pre>
                   <p>
-                    and enforces <code>acc1(X) == acc2(X)</code> inside EMP-ZK. If this holds for a random
-                    X in a large prime field, the intended conclusion is that the two multisets of
-                    10 values are equal.
+                    The intended argument is polynomial identity: if two degree-10 polynomials agree
+                    on a random <code>X</code> in a large prime field, they are equal with overwhelming
+                    probability, so the underlying multiset of 10 values is the same.
                   </p>
                   <div class="callout subtle">
                     <p class="callout-title">Field</p>
@@ -120,36 +113,39 @@ acc2(X) = prod_{i=0..9} (array2[i] + X)</code></pre>
                 <section id="bug" class="block">
                   <h4>Root Cause</h4>
                   <p>
-                    The multiplication-gate correctness check is supposed to combine all gates with
-                    random coefficients. In this build, the loop that should iterate across gates
-                    starts at the last gate and (because the index is unsigned) executes exactly once.
-                    Net result:
+                    The arithmetic multiplication check builds random coefficients <code>chi[k]</code> from a
+                    per-check <code>seed</code>, then sums across all multiplication gates. In this build, the
+                    loop bounds are wrong for an unsigned index, so the loop executes exactly once
+                    (for the last gate). Since <code>chi[0] = seed</code>, the check reduces to:
                   </p>
                   <pre><code class="language-text">U = A0 * seed
 V = A1 * seed</code></pre>
                   <p>
-                    So for <code>seed != 0</code> we recover <code>A1 = V / seed (mod PR)</code> from a single probe.
-                    The probe prints <code>seed</code> and <code>V</code>, which is the leak.
+                    The probe transcript exposes <code>seed</code> and <code>V</code>. When <code>seed != 0</code>, we recover:
                   </p>
+                  <pre><code class="language-text">A1 = V / seed (mod PR)</code></pre>
                 </section>
 
                 <section id="leak" class="block">
                   <h4>Turning The Leak Into Equations</h4>
                   <p>
-                    For the last multiplication gate, let inputs be <code>a</code>, <code>b</code>, output <code>p=a*b</code>.
-                    With EMP-ZK's authenticated representation, the transcript exposes verifier-side
-                    key material <code>ka, kb, kc</code> and the global MAC delta <code>delta</code>. You can derive:
+                    For the last multiplication gate with inputs <code>a</code>, <code>b</code> and output <code>p=a*b</code>,
+                    the transcript also exposes verifier-side values <code>ka</code>, <code>kb</code>, <code>kc</code> and the
+                    global MAC key <code>delta</code>. Using the authenticated-value identities, you derive
+                    a single linear equation per probe run:
                   </p>
-                  <pre><code class="language-text">kb*a + ka*b + delta*p = A1 + kc   (mod PR)</code></pre>
+                  <pre><code class="language-text">kb*a + ka*b + delta*p = A1 + kc  (mod PR)</code></pre>
                   <p>
-                    For a fixed public X, collect 3 transcripts and solve the 3x3 system for
-                    <code>(a, b, p)</code>. Sanity check with <code>p == a*b</code>.
+                    Unknowns are <code>a</code>, <code>b</code>, <code>p</code>. Collect 3 probe transcripts for the same public
+                    <code>X</code>, solve the 3x3 system in <code>F_PR</code> with modular Gaussian elimination, and
+                    keep only solutions that satisfy <code>p == a*b</code>.
                   </p>
                   <div class="callout subtle">
-                    <p class="callout-title">Last Gate Interpretation</p>
+                    <p class="callout-title">Circuit Mapping</p>
                     <p>
-                      The circuit's last multiplication is <code>acc2 = acc2 * (array2[9] + X)</code>, so
-                      <code>b(X) = array2[9] + X</code> and <code>v9 = b(X) - X</code>.
+                      The circuit's final multiplication is <code>acc2 = acc2 * (array2[9] + X)</code>, so
+                      the last-gate right input is <code>b(X) = array2[9] + X</code> and
+                      <code>v9 = b(X) - X</code>.
                     </p>
                   </div>
                 </section>
@@ -157,35 +153,38 @@ V = A1 * seed</code></pre>
                 <section id="poly" class="block">
                   <h4>Interpolation + Factoring</h4>
                   <p>
-                    The other recovered value is:
+                    The left input to the last gate is the accumulator before the final multiply:
                   </p>
                   <pre><code class="language-text">a(X) = prod_{i=0..8} (array2[i] + X)</code></pre>
                   <p>
-                    This is a degree-9 polynomial. Evaluate it at X = 0..9 (10 points), interpolate
-                    the polynomial, then factor it mod PR. Its roots are <code>X = -array2[i]</code>, so you
-                    recover the remaining 9 values.
+                    This is a degree-9 polynomial over <code>F_PR</code>. Evaluate <code>a(X)</code> for 10 distinct
+                    X values (e.g. 0..9), interpolate the polynomial, and factor it mod PR:
+                  </p>
+                  <pre><code class="language-text">a(X) = prod_{i=0..8} (X + v_i)</code></pre>
+                  <p>
+                    The roots are <code>X = -v_i</code>. Recover all 9 values and add <code>v9</code> from the last-gate
+                    right input.
                   </p>
                 </section>
 
                 <section id="submit" class="block">
                   <h4>Submission</h4>
                   <p>
-                    Submit the 10 recovered values (any order) via:
+                    The submit client accepts the 10 guesses via environment variable:
                   </p>
                   <pre><code class="language-text">SLOWGOLD_GUESSES=v0,v1,...,v9</code></pre>
+                  <p>
+                    Any order works (server checks a permutation).
+                  </p>
                 </section>
 
                 <section id="notes" class="block">
                   <h4>Reliability Notes</h4>
                   <ul>
-                    <li><strong>seed == 0:</strong> skip that transcript (division undefined) and retry.</li>
-                    <li><strong>singular systems:</strong> try different triples until elimination succeeds.</li>
-                    <li><strong>integrity check:</strong> enforce <code>p == a*b</code> to avoid bad solves.</li>
+                    <li><strong>seed == 0:</strong> skip (A1 undefined) and retry.</li>
+                    <li><strong>singular 3x3 systems:</strong> try different triples until elimination succeeds.</li>
+                    <li><strong>integrity check:</strong> enforce <code>p == a*b</code> to reject accidental solutions.</li>
                   </ul>
-                  <p>
-                    Full technical notes are available in
-                    <a class="inline" href="crypto_slow-gold_writeup.txt">crypto_slow-gold_writeup.txt</a>.
-                  </p>
                 </section>
               </article>
             </div>

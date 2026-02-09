@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --bg: #0f1216;
   --surface: #151a21;
   --surface-2: #1c222b;
@@ -320,6 +320,12 @@ a {
   margin-top: 8px;
 }
 
+.prose h4 {
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  margin-top: 6px;
+}
+
 .prose p {
   color: var(--muted);
   line-height: 1.7;
@@ -342,6 +348,27 @@ pre {
   font-family: "IBM Plex Mono", "Courier New", monospace;
   font-size: 0.82rem;
   color: var(--text);
+}
+
+.figure {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.figure img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.figure figcaption {
+  font-family: "IBM Plex Mono", "Courier New", monospace;
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 code {

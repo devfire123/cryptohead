@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>slow-gold (Crypto) | Axiom Vale</title>
+    <meta
+      name="description"
+      content="LA CTF slow-gold: breaking EMP-ZK via a multiplication gate batch-check bug; interpolate + factor to recover the hidden multiset."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="site-header">
+        <div class="logo">Axiom Vale</div>
+        <nav class="nav-links">
+          <a href="index.html">Home</a>
+          <a href="writeups.html">Writeups</a>
+          <a href="blog.html">Blog</a>
+          <a href="experience.html">Experience</a>
+          <a href="projects.html">Projects</a>
+          <a href="contact.html">Contact</a>
+        </nav>
+        <div class="badge">Crypto + Misc CTF</div>
+      </header>
+
+      <main>
+        <section class="writeup-hero">
+          <div>
+            <p class="eyebrow">LA CTF · Crypto</p>
+            <h1>slow-gold</h1>
+            <p class="lede">
+              An EMP-ZK arithmetic proof leaks the last multiplication gate. Recover wire
+              values as a function of the public challenge X, interpolate a degree-9
+              polynomial, factor it, and submit the hidden multiset.
+            </p>
+          </div>
+          <div class="writeup-meta">
+            <span class="tag">team: Flagsomnia</span>
+            <span class="tag">handle: silent</span>
+            <span class="tag">crypto</span>
+            <span class="tag">zkp</span>
+            <span class="tag">lattice-free</span>
+          </div>
+        </section>
+
+        <section class="prose-card">
+          <div class="prose">
+            <figure class="figure">
+              <img
+                src="assets/slow-gold-solved.png"
+                alt="Proof of solve for LA CTF crypto/slow-gold"
+                loading="lazy"
+              />
+              <figcaption>
+                Solve proof screenshot (LA CTF crypto/slow-gold).
+              </figcaption>
+            </figure>
+
+            <h3>Flag</h3>
+            <pre><code class="language-text">lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}</code></pre>
+
+            <h3>Key Idea (One Paragraph)</h3>
+            <p>
+              The challenge uses an EMP-ZK arithmetic proof. A subtle bug in the library's
+              multiplication-gate batch check collapses the multi-gate random linear
+              combination into "check only the last multiplication gate." The verifier can
+              read enough of the check transcript to recover the prover's wire values as a
+              function of the public challenge X. Those wire values are evaluations of a
+              degree-9 polynomial; interpolating and factoring it yields the secret inputs,
+              which can then be submitted to get the flag.
+            </p>
+
+            <h3>0. Reproduction</h3>
+            <p>
+              Run the solver:
+            </p>
+            <pre><code class="language-bash">python3 solve_slowgold.py</code></pre>
+            <p>
+              Example output:
+            </p>
+            <pre><code class="language-text">[X=0] a=1811319579736929840 b=1185230980869603820 v9=1185230980869603820
+[X=1] a=1347261408062289609 b=1185230980869603821 v9=1185230980869603820
+[X=2] a=1623470127944424535 b=1185230980869603822 v9=1185230980869603820
+[X=3] a=1251409870297431806 b=1185230980869603823 v9=1185230980869603820
+[X=4] a=524114117384685984 b=1185230980869603824 v9=1185230980869603820
+[X=5] a=1334345023845748360 b=1185230980869603825 v9=1185230980869603820
+[X=6] a=122449731357871313 b=1185230980869603826 v9=1185230980869603820
+[X=7] a=2161881734017330867 b=1185230980869603827 v9=1185230980869603820
+[X=8] a=683443398518365972 b=1185230980869603828 v9=1185230980869603820
+[X=9] a=893322674715030543 b=1185230980869603829 v9=1185230980869603820
+[v9] 1185230980869603820
+[submit] flag recv
+lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}</code></pre>
+
+            <h3>1. What The Challenge Is Doing</h3>
+            <p>
+              The prover (ALICE) holds two secret arrays of 10 field elements each,
+              <code>array1[0..9]</code> and <code>array2[0..9]</code>. The verifier (BOB) chooses a
+              public challenge <code>X</code>. The circuit computes:
+            </p>
+            <pre><code class="language-text">acc1(X) = Π_{i=0..9} (array1[i] + X)
+acc2(X) = Π_{i=0..9} (array2[i] + X)</code></pre>
+            <p>
+              and enforces <code>acc1(X) == acc2(X)</code> in zero-knowledge. Afterwards, the server
+              asks for 10 guesses; if they match the hidden values, it returns the flag.
+            </p>
+
+            <h3>2. Field And Representation</h3>
+            <p>
+              The arithmetic field is:
+            </p>
+            <pre><code class="language-text">PR = 2305843009213693951 = 2^61 - 1</code></pre>
+            <p>
+              EMP-ZK uses IT-MAC style authenticated values. You do not need the full protocol
+              to solve this; you only need the single linear relation derived from the
+              multiplication check.
+            </p>
+
+            <h3>3. The Multiplication Check Bug (Root Cause)</h3>
+            <p>
+              The batch check is supposed to combine all multiplication gates using random
+              coefficients <code>chi[k]</code> derived from <code>seed</code>. In this build, the loop in
+              <code>FpOSTriple::andgate_correctness_check</code> starts at the last gate and, because
+              the index is unsigned, runs exactly once. Also, <code>chi</code> is generated with
+              length 1, so <code>chi[0] = seed</code>. Net effect:
+            </p>
+            <pre><code class="language-text">U = A0 * seed
+V = A1 * seed</code></pre>
+            <p>
+              So (when <code>seed != 0</code>) we can compute:
+            </p>
+            <pre><code class="language-text">A1 = V / seed  (mod PR)</code></pre>
+            <p>
+              The probe client prints <code>V</code> and <code>seed</code>, making <code>A1</code> recoverable per run.
+            </p>
+
+            <h3>4. What Is A1 And The Linear System</h3>
+            <p>
+              For a multiplication gate with inputs <code>a</code>, <code>b</code> and output <code>p=a*b</code>, the
+              check code defines:
+            </p>
+            <pre><code class="language-text">A0 = ma * mb
+A1 = a*mb + b*ma - mc</code></pre>
+            <p>
+              Using the IT-MAC identities for verifier keys
+              <code>ka = ma - delta*a</code>, <code>kb = mb - delta*b</code>, <code>kc = mc - delta*p</code>, we can
+              rewrite <code>A1</code> into the exact solver relation:
+            </p>
+            <pre><code class="language-text">kb*a + ka*b + delta*p = A1 + kc  (mod PR)</code></pre>
+            <p>
+              Everything on the right is observable per transcript (delta, seed, V, ka, kb, kc),
+              and <code>A1</code> is computed as <code>V/seed</code>. Unknowns for that run are <code>a</code>, <code>b</code>, <code>p</code>.
+            </p>
+
+            <h3>5. Solve (a, b, p) With 3 Probe Transcripts</h3>
+            <p>
+              Each probe run gives one linear equation in the three unknowns. With 3 transcripts
+              for the same public <code>X</code>, you solve a 3x3 system in <code>F_PR</code> via modular Gaussian
+              elimination, then sanity-check that <code>p == a*b</code>.
+            </p>
+
+            <h3>6. Why v9 Falls Out Immediately</h3>
+            <p>
+              The last multiplication gate in the circuit is the final update of <code>acc2</code>:
+            </p>
+            <pre><code class="language-text">acc2 = acc2 * (array2[9] + X)</code></pre>
+            <p>
+              Therefore, for the last gate:
+            </p>
+            <pre><code class="language-text">a(X) = Π_{i=0..8} (array2[i] + X)
+b(X) = array2[9] + X</code></pre>
+            <p>
+              So <code>array2[9] = b(X) - X</code> (mod PR). In practice this is constant across X=0..9.
+            </p>
+
+            <h3>7. Recover The Other 9 Values</h3>
+            <p>
+              Since <code>a(X)</code> is a degree-9 polynomial, 10 distinct evaluations uniquely determine
+              it. Interpolate from X=0..9 to get <code>P(X)</code>, then factor it mod PR:
+            </p>
+            <pre><code class="language-text">P(X) = Π_{i=0..8} (X + array2[i])</code></pre>
+            <p>
+              The roots are <code>X = -array2[i]</code>, yielding the remaining 9 values.
+            </p>
+
+            <h3>8. Submission</h3>
+            <p>
+              The submission client accepts guesses via:
+            </p>
+            <pre><code class="language-text">SLOWGOLD_GUESSES=v0,v1,...,v9</code></pre>
+
+            <h3>9. Reliability Notes</h3>
+            <ul>
+              <li><strong>seed == 0:</strong> discard that transcript and retry.</li>
+              <li><strong>singular 3x3 systems:</strong> try different triples until elimination succeeds and p == a*b.</li>
+              <li><strong>network flakiness:</strong> wrap probes with timeouts and retry.</li>
+            </ul>
+
+            <h3>Appendix</h3>
+            <ul>
+              <li><code>solve_slowgold.py</code>: exploit + interpolation + factoring + submission</li>
+              <li><code>slowgold_submit.cpp</code>: circuit definition</li>
+              <li><code>slowgold_probe.cpp</code>: prints transcript JSON</li>
+              <li><code>ostriple.h</code>: bugged loop and last-gate scratchpad</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="writeup-nav">
+          <a class="secondary" href="writeups.html">&larr; Back to writeups</a>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+      </footer>
+    </div>
+    <script>
+      const year = document.getElementById("year");
+      if (year) year.textContent = new Date().getFullYear();
+    </script>
+  </body>
+</html>

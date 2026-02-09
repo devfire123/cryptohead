@@ -339,6 +339,89 @@ a {
   gap: 8px;
 }
 
+.layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.toc {
+  position: sticky;
+  top: 96px;
+  background: rgba(28, 34, 43, 0.35);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.toc-title {
+  font-family: "IBM Plex Mono", "Courier New", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.toc a {
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 6px 8px;
+  border-radius: 10px;
+}
+
+.toc a:hover,
+.toc a:focus {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.article {
+  display: grid;
+  gap: 16px;
+}
+
+.block {
+  padding: 14px 14px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(15, 18, 22, 0.35);
+}
+
+.callout {
+  padding: 14px 14px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(124, 243, 198, 0.25);
+  background: rgba(124, 243, 198, 0.06);
+}
+
+.callout.subtle {
+  border-color: rgba(106, 167, 255, 0.25);
+  background: rgba(106, 167, 255, 0.06);
+}
+
+.callout-title {
+  font-family: "IBM Plex Mono", "Courier New", monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.inline {
+  color: var(--accent-2);
+  text-decoration: none;
+}
+
+.inline:hover,
+.inline:focus {
+  text-decoration: underline;
+}
+
 .downloads {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -567,6 +650,14 @@ code {
   .hero-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .toc {
+    position: static;
   }
 
   .timeline-item {

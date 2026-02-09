@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -67,426 +67,129 @@
 <a class="dl" href="artifacts/slow-gold/slowgold_probe.cpp" download><span class="dl-name">slowgold_probe.cpp</span><span class="dl-meta">2.2 KB</span></a>
 <a class="dl" href="artifacts/slow-gold/slowgold_submit.cpp" download><span class="dl-name">slowgold_submit.cpp</span><span class="dl-meta">2.5 KB</span></a>
 <a class="dl" href="artifacts/slow-gold/ostriple.h" download><span class="dl-name">ostriple.h</span><span class="dl-meta">9.7 KB</span></a>
+<a class="dl" href="crypto_slow-gold_writeup.txt" download><span class="dl-name">crypto_slow-gold_writeup.txt</span><span class="dl-meta">full notes</span></a>
             </div>
 
-            <h3>Writeup</h3>
-            <details class="code" open>
-              <summary>LA CTF (crypto) - slow-gold (full)</summary>
-              <pre><code class="language-text">LA CTF 2025/2026 (crypto) - slow-gold
-====================================
-
-Flag: lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}
-
-This is a full technical writeup for the challenge `crypto/slow-gold`.
-
-The key idea: the challenge uses an EMP-ZK arithmetic proof. A subtle bug in the
-library&#x27;s multiplication-gate batch check reduces a multi-gate random linear
-combination into &quot;check only the last multiplication gate&quot;, and the verifier
-can read out enough of the check transcript to recover the prover&#x27;s wire values
-as a function of the public challenge X. Those wire values are evaluations of a
-degree-9 polynomial; interpolating and factoring it yields the secret inputs,
-which can then be submitted to get the flag.
-
-
-0. Reproduction / &quot;Screenshots&quot;
--------------------------------
-
-All commands below were executed from:
-  /home/kali/Desktop/ctf/lactf_cryptochallenges
-
-Solver transcript is saved here:
-  writeup_artifacts/slowgold_solver_transcript_2.txt
-
-Run:
-
-  python3 solve_slowgold.py
-
-Observed output (verbatim):
-
-  [X=0] a=1811319579736929840 b=1185230980869603820 v9=1185230980869603820
-  [X=1] a=1347261408062289609 b=1185230980869603821 v9=1185230980869603820
-  [X=2] a=1623470127944424535 b=1185230980869603822 v9=1185230980869603820
-  [X=3] a=1251409870297431806 b=1185230980869603823 v9=1185230980869603820
-  [X=4] a=524114117384685984 b=1185230980869603824 v9=1185230980869603820
-  [X=5] a=1334345023845748360 b=1185230980869603825 v9=1185230980869603820
-  [X=6] a=122449731357871313 b=1185230980869603826 v9=1185230980869603820
-  [X=7] a=2161881734017330867 b=1185230980869603827 v9=1185230980869603820
-  [X=8] a=683443398518365972 b=1185230980869603828 v9=1185230980869603820
-  [X=9] a=893322674715030543 b=1185230980869603829 v9=1185230980869603820
-  [v9] 1185230980869603820
-  [submit] start
-  connected
-  [submit] netio ready
-  [submit] setup done
-  [submit] zkp done
-  [submit] guesses sent
-  [submit] waiting flag...
-  [submit] flag recv
-  lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}
-
-
-1. What The Challenge Is Doing
-------------------------------
-
-The provided (patched) submission client is:
-  dist/emp-zk/test/arith/slowgold_submit.cpp
-
-The core computation is:
-
-  - The prover (ALICE) has two secret arrays:
-      array1[0..9], array2[0..9]  (field elements)
-  - The verifier (BOB, us) chooses a public challenge X and sends it.
-  - They compute:
-      acc1(X) = Π_{i=0..9} (array1[i] + X)
-      acc2(X) = Π_{i=0..9} (array2[i] + X)
-    and enforce acc1(X) == acc2(X) in zero-knowledge.
-
-In code, the &quot;only&quot; asserted relation is:
-
-  dist/emp-zk/test/arith/slowgold_submit.cpp
-    acc1 = acc1 * (array1[i] + X);
-    acc2 = acc2 * (array2[i] + X);
-    final_zero = acc1 - acc2;
-    batch_reveal_check_zero(final_zero);
-
-After the ZK proof completes, the server asks us to send 10 guesses (uint64),
-and if the guesses match the hidden values, it sends the flag.
-
-Interpretation (math):
-
-Let f1(t) = Π (array1[i] + t) and f2(t) = Π (array2[i] + t).
-They are degree-10 polynomials over a prime field. If f1(X) == f2(X) for a
-random X in a large field, then (with overwhelming probability) f1 == f2 as
-polynomials, hence the multisets {array1[i]} and {array2[i]} are equal.
-
-So there is one hidden multiset of 10 values; either array is that multiset.
-
-
-2. Field And EMP-ZK Representation
----------------------------------
-
-The arithmetic field used here is:
-
-  PR = 2305843009213693951 = 2^61 - 1
-
-This is a Mersenne prime, used throughout EMP-ZK&#x27;s arithmetic backend.
-
-EMP-ZK stores authenticated values as &quot;IT-MAC&quot; style pairs:
-  prover holds (value, mac_share)
-  verifier holds &quot;key&quot; related to (value, mac_share) and the global delta.
-
-You do NOT need the full EMP-ZK protocol to solve the challenge; you only need
-one derived relation from the multiplication-gate batch check (next section).
-
-
-3. The Multiplication Check Bug (Root Cause)
---------------------------------------------
-
-The probe binary is:
-  dist/emp-zk/bin/test_arith_slowgold_probe
-
-Source:
-  dist/emp-zk/test/arith/slowgold_probe.cpp
-
-It runs the same ZK circuit, but afterwards prints a JSON object that contains:
-
-  X, delta, seed, U, V, ka, kb, kc
-
-Those values are captured from a header-only scratchpad:
-  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h
-
-Specifically, on the verifier side (BOB) the library stores:
-  - delta (global MAC key, field element)
-  - seed (random coefficient used by the multiplication check)
-  - U, V (the prover&#x27;s reported check sums)
-  - ka, kb, kc (verifier-side key material for the *last* multiplication gate)
-
-Now the bug:
-
-In the arithmetic triple/check implementation, the multiplication-gate batch
-check is supposed to combine ALL multiplication gates via a random linear
-combination with coefficients chi[k] = seed^(k+1) (or similar).
-
-In this challenge build, however, the loop inside
-  FpOSTriple::andgate_correctness_check(...)
-is:
-
-  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h:351
-    for (uint32_t i = start + task_n - 1, k = 0;
-         i &lt; start + task_n;
-         ++i, ++k) {
-      ...
-      U += A0 * chi[k];
-      V += A1 * chi[k];
-    }
-
-Because `i` is an unsigned 32-bit integer, this loop executes EXACTLY ONCE:
-  - It starts at i = start + task_n - 1 (the last gate)
-  - Condition is i &lt; start + task_n, which is true for that single i
-  - It increments i to start + task_n, and then the condition becomes false
-
-Therefore, instead of summing over all multiplication gates, it only checks
-the very last multiplication gate, with coefficient chi[0].
-
-Also, chi is generated as:
-
-  dist/emp-zk/emp-zk/emp-vole/utility.h:188
-    coeff[0] = seed;
-    coeff[i] = coeff[i-1] * seed;
-
-And in `ostriple.h`, this arithmetic check uses only sz=1:
-
-  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h:346
-    uni_hash_coeff_gen(chi, seed, 1);
-
-So chi[0] = seed.
-
-Conclusion:
-
-  U = A0 * seed
-  V = A1 * seed
-
-where A0, A1 are functions of the last multiplication gate&#x27;s internal wires.
-
-That means we can compute:
-
-  A1 = V / seed  (mod PR), as long as seed != 0
-
-This is the leak. `slowgold_probe.cpp` gives us `V` and `seed`, so we can
-recover A1 for each probe run.
-
-
-4. What Is A1 And Why It Gives A Linear System
-----------------------------------------------
-
-For a multiplication gate with left input &quot;a&quot;, right input &quot;b&quot;, and output
-&quot;p = a*b&quot;, the check code computes (prover side):
-
-  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h:352-361
-    a  = HIGH64(left[i]);
-    ma = LOW64(left[i]);
-    b  = HIGH64(right[i]);
-    mb = LOW64(right[i]);
-    mc = LOW64(gateout[i]);
-
-    A0 = ma * mb
-    A1 = a*mb + b*ma - mc
-
-On the verifier side, it uses:
-
-  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h:371-375
-    ka = LOW64(left[i]);
-    kb = LOW64(right[i]);
-    kc = LOW64(gateout[i]);
-    B  = ka*kb + kc*delta
-
-And finally enforces for the batch check:
-
-  A0 == delta*A1 + B
-
-(With the bug, this is enforced only for the last multiplication gate.)
-
-Now the crucial IT-MAC identities for verifier keys (derived from how EMP-ZK
-builds them; see `authenticated_val_input()` and `auth_compute_mul_recv()`):
-
-  ka = ma - delta*a
-  kb = mb - delta*b
-  kc = mc - delta*p
-
-Rearrange:
-  ma = ka + delta*a
-  mb = kb + delta*b
-  mc = kc + delta*p
-
-Plug those into A1:
-
-  A1 = a*(kb + delta*b) + b*(ka + delta*a) - (kc + delta*p)
-     = a*kb + b*ka + 2*delta*a*b - kc - delta*p
-
-Since p = a*b, we simplify:
-
-  A1 = a*kb + b*ka + delta*p - kc
-
-Rearrange to the exact linear relation used by the solver:
-
-  kb*a + ka*b + delta*p = A1 + kc        (mod PR)
-
-Everything on the right is observable per probe transcript:
-  - ka, kb, kc, delta, seed, V are printed by the probe
-  - A1 = V / seed (mod PR) due to the bug
-
-Unknowns for that specific run:
-  - a (left wire value of the last multiplication gate)
-  - b (right wire value of the last multiplication gate)
-  - p = a*b
-
-But note: delta is fixed per connection, while ka/kb/kc (and thus the equation)
-change per connection because the protocol uses fresh VOLE samples.
-
-
-5. Solving For (a, b) Using 3 Probe Transcripts
-------------------------------------------------
-
-Each probe run gives a single linear equation in the three unknowns:
-
-  kb*a + ka*b + delta*p = A1 + kc
-
-If we collect 3 transcripts for the same public X, we can solve the 3x3 system
-for (a, b, p) in the field PR, using modular Gaussian elimination.
-
-The solver does exactly this:
-  solve_slowgold.py: solve_linear_system_3(...)
-
-It also sanity-checks that the recovered p matches a*b:
-  (a*b) % PR == p
-
-This prevents accidental use of a singular/degenerate triple of equations.
-
-
-6. Why V9 Falls Out Immediately (b - X)
----------------------------------------
-
-Now we interpret which gate is &quot;the last multiplication gate&quot; in the circuit.
-
-The circuit multiplies in a loop:
-
-  for i in 0..9:
-    acc1 *= (array1[i] + X)
-    acc2 *= (array2[i] + X)
-
-Within each iteration, acc2&#x27;s multiplication occurs after acc1&#x27;s multiplication.
-So the very last multiplication gate executed in the entire circuit is:
-
-  acc2 = acc2 * (array2[9] + X)
-
-Thus, for the last multiplication gate:
-  a = acc2_before = Π_{i=0..8} (array2[i] + X)
-  b = array2[9] + X
-
-Therefore:
-  array2[9] = b - X  (mod PR)
-
-The solver records v9_votes = (b - X) across X=0..9 and takes the majority vote.
-In practice it is constant and the vote just makes it robust to rare bad probes.
-
-
-7. Recovering The Other 9 Values via Polynomial Interpolation + Factoring
--------------------------------------------------------------------------
-
-From the previous section:
-
-  a(X) = Π_{i=0..8} (array2[i] + X)
-
-This is a degree-9 polynomial in X over the field PR.
-
-If we can evaluate a(X) at 10 distinct X values, we can uniquely interpolate
-the polynomial coefficients.
-
-The solver chooses X = 0..9 and recovers a(X) using the linear-system method
-above, producing points:
-
-  (0, a0), (1, a1), ..., (9, a9)
-
-Then it performs Lagrange interpolation in the field to obtain coefficients:
-
-  P(X) = c0 + c1*X + ... + c9*X^9
-
-Implementation:
-  solve_slowgold.py: lagrange_interpolate(...)
-
-Now, factor P(X) mod PR. Since:
-
-  a(X) = Π_{i=0..8} (X + array2[i])
-
-the roots of P(X) are:
-
-  X = -array2[i]
-
-So factoring P(X) into linear factors yields all 9 roots, hence all 9 values.
-
-Implementation:
-  solve_slowgold.py: roots_from_poly(...)
-  (uses sympy Poly(..., modulus=PR) and factor_list())
-
-Finally:
-  recovered_values = { array2[0..8], array2[9] }
-
-
-8. Submitting And Getting The Flag
-----------------------------------
-
-The submission client:
-  dist/emp-zk/bin/test_arith_slowgold_submit
-
-Accepts guesses via env var:
-  SLOWGOLD_GUESSES=v0,v1,...,v9
-
-The solver runs it after computing the values. The server replies with the flag:
-
-  lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}
-
-
-9. Why This Works (Proof Sketch)
---------------------------------
-
-There are two probabilistic arguments and two deterministic ones:
-
-(A) Deterministic: bug =&gt; single-gate check
-    The `for` loop in `ostriple.h` executes exactly once, so U and V are computed
-    from only the last gate, with coefficient seed. Therefore A1 = V/seed.
-
-(B) Deterministic: A1 + verifier keys =&gt; linear equation
-    Using the IT-MAC relation between prover MAC shares (ma,mb,mc), values (a,b),
-    product p=a*b, and verifier keys (ka,kb,kc) with delta, we derive:
-      kb*a + ka*b + delta*p = A1 + kc
-
-(C) Deterministic: last gate structure =&gt; polynomial evaluations
-    The last gate is acc2_before * (array2[9]+X), so b-X reveals array2[9], and
-    a(X) equals the degree-9 product Π_{i=0..8} (array2[i]+X).
-
-(D) Probabilistic but overwhelming: interpolation + factoring recovers roots
-    Given 10 distinct X values in a prime field, a degree-9 polynomial is uniquely
-    determined by its evaluations, so interpolation recovers the exact polynomial.
-    Factoring over a prime field yields its linear roots (the -array2[i]) since it
-    is exactly a product of distinct linear factors in the intended construction.
-
-
-10. Notes / Reliability
------------------------
-
-1) seed == 0:
-   If a probe transcript has seed=0, then A1 = V/seed is undefined. The solver
-   discards such rows and retries.
-
-2) Singular 3x3 systems:
-   Some triples of equations can be singular mod PR. The solver tries multiple
-   combinations of collected rows until Gaussian elimination succeeds and the
-   p == a*b consistency check passes.
-
-3) Network flakiness:
-   The probe wraps the binary with a timeout and retries; this is why the solve
-   can take several minutes end-to-end.
-
-
-Appendix: Relevant Files
-------------------------
-
-  - solve_slowgold.py
-      Full exploit + interpolation + factoring + submission.
-
-  - dist/emp-zk/test/arith/slowgold_submit.cpp
-      The original protocol: prove Π(array1[i]+X) == Π(array2[i]+X).
-
-  - dist/emp-zk/test/arith/slowgold_probe.cpp
-      A helper client that prints the check transcript JSON used by the solver.
-
-  - dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h
-      Where the bugged loop lives and where last-gate values are stored.
-
-</code></pre>
-            </details>
-
-            <h3>Reference Code</h3>
+                        <h3>Writeup</h3>
+            <div class="layout">
+              <aside class="toc">
+                <p class="toc-title">Contents</p>
+                <a href="#tl-dr">TL;DR</a>
+                <a href="#protocol">What The Protocol Proves</a>
+                <a href="#bug">Root Cause</a>
+                <a href="#leak">Turning The Leak Into Equations</a>
+                <a href="#poly">Interpolation + Factoring</a>
+                <a href="#submit">Submission</a>
+                <a href="#notes">Reliability Notes</a>
+              </aside>
+              <article class="article">
+                <section id="tl-dr" class="block">
+                  <h4>TL;DR</h4>
+                  <p>
+                    The verifier transcript leaks the last multiplication gate because the EMP-ZK
+                    batch check unintentionally checks only one gate. That leak gives a linear
+                    equation in <code>(a, b, p=a*b)</code>. Solve three transcripts per X, recover
+                    <code>a(X)</code> and <code>b(X)</code>, then: <code>v9 = b(X) - X</code>. The remaining 9 values
+                    fall out by interpolating <code>a(X)</code> as a degree-9 polynomial and factoring it.
+                  </p>
+                  <div class="callout">
+                    <p class="callout-title">Flag</p>
+                    <pre><code class="language-text">lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}</code></pre>
+                  </div>
+                </section>
+
+                <section id="protocol" class="block">
+                  <h4>What The Protocol Proves</h4>
+                  <p>
+                    The prover has two secret arrays of 10 field elements each. The verifier chooses
+                    a public challenge <code>X</code>. The circuit computes:
+                  </p>
+                  <pre><code class="language-text">acc1(X) = prod_{i=0..9} (array1[i] + X)
+acc2(X) = prod_{i=0..9} (array2[i] + X)</code></pre>
+                  <p>
+                    and enforces <code>acc1(X) == acc2(X)</code> inside EMP-ZK. If this holds for a random
+                    X in a large prime field, the intended conclusion is that the two multisets of
+                    10 values are equal.
+                  </p>
+                  <div class="callout subtle">
+                    <p class="callout-title">Field</p>
+                    <pre><code class="language-text">PR = 2305843009213693951  (2^61 - 1)</code></pre>
+                  </div>
+                </section>
+
+                <section id="bug" class="block">
+                  <h4>Root Cause</h4>
+                  <p>
+                    The multiplication-gate correctness check is supposed to combine all gates with
+                    random coefficients. In this build, the loop that should iterate across gates
+                    starts at the last gate and (because the index is unsigned) executes exactly once.
+                    Net result:
+                  </p>
+                  <pre><code class="language-text">U = A0 * seed
+V = A1 * seed</code></pre>
+                  <p>
+                    So for <code>seed != 0</code> we recover <code>A1 = V / seed (mod PR)</code> from a single probe.
+                    The probe prints <code>seed</code> and <code>V</code>, which is the leak.
+                  </p>
+                </section>
+
+                <section id="leak" class="block">
+                  <h4>Turning The Leak Into Equations</h4>
+                  <p>
+                    For the last multiplication gate, let inputs be <code>a</code>, <code>b</code>, output <code>p=a*b</code>.
+                    With EMP-ZK's authenticated representation, the transcript exposes verifier-side
+                    key material <code>ka, kb, kc</code> and the global MAC delta <code>delta</code>. You can derive:
+                  </p>
+                  <pre><code class="language-text">kb*a + ka*b + delta*p = A1 + kc   (mod PR)</code></pre>
+                  <p>
+                    For a fixed public X, collect 3 transcripts and solve the 3x3 system for
+                    <code>(a, b, p)</code>. Sanity check with <code>p == a*b</code>.
+                  </p>
+                  <div class="callout subtle">
+                    <p class="callout-title">Last Gate Interpretation</p>
+                    <p>
+                      The circuit's last multiplication is <code>acc2 = acc2 * (array2[9] + X)</code>, so
+                      <code>b(X) = array2[9] + X</code> and <code>v9 = b(X) - X</code>.
+                    </p>
+                  </div>
+                </section>
+
+                <section id="poly" class="block">
+                  <h4>Interpolation + Factoring</h4>
+                  <p>
+                    The other recovered value is:
+                  </p>
+                  <pre><code class="language-text">a(X) = prod_{i=0..8} (array2[i] + X)</code></pre>
+                  <p>
+                    This is a degree-9 polynomial. Evaluate it at X = 0..9 (10 points), interpolate
+                    the polynomial, then factor it mod PR. Its roots are <code>X = -array2[i]</code>, so you
+                    recover the remaining 9 values.
+                  </p>
+                </section>
+
+                <section id="submit" class="block">
+                  <h4>Submission</h4>
+                  <p>
+                    Submit the 10 recovered values (any order) via:
+                  </p>
+                  <pre><code class="language-text">SLOWGOLD_GUESSES=v0,v1,...,v9</code></pre>
+                </section>
+
+                <section id="notes" class="block">
+                  <h4>Reliability Notes</h4>
+                  <ul>
+                    <li><strong>seed == 0:</strong> skip that transcript (division undefined) and retry.</li>
+                    <li><strong>singular systems:</strong> try different triples until elimination succeeds.</li>
+                    <li><strong>integrity check:</strong> enforce <code>p == a*b</code> to avoid bad solves.</li>
+                  </ul>
+                  <p>
+                    Full technical notes are available in
+                    <a class="inline" href="crypto_slow-gold_writeup.txt">crypto_slow-gold_writeup.txt</a>.
+                  </p>
+                </section>
+              </article>
+            </div>
+<h3>Reference Code</h3>
             <p>
               These are the exact files referenced in the writeup, included here for convenience.
             </p>

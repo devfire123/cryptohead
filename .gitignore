@@ -1,0 +1,6 @@
+# Local throwaway/source copies (tracked versions live under artifacts/slow-gold/)
+solve_slowgold.py
+slowgold_probe.cpp
+slowgold_submit.cpp
+ostriple.h
+

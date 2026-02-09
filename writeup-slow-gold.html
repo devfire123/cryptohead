@@ -6,7 +6,7 @@
     <title>slow-gold (Crypto) | Axiom Vale</title>
     <meta
       name="description"
-      content="LA CTF slow-gold: breaking EMP-ZK via a multiplication gate batch-check bug; interpolate + factor to recover the hidden multiset."
+      content="LA CTF slow-gold: breaking EMP-ZK via a multiplication-gate batch-check bug; interpolate + factor to recover the hidden multiset."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -34,12 +34,11 @@
       <main>
         <section class="writeup-hero">
           <div>
-            <p class="eyebrow">LA CTF · Crypto</p>
+            <p class="eyebrow">LA CTF / Crypto</p>
             <h1>slow-gold</h1>
             <p class="lede">
-              An EMP-ZK arithmetic proof leaks the last multiplication gate. Recover wire
-              values as a function of the public challenge X, interpolate a degree-9
-              polynomial, factor it, and submit the hidden multiset.
+              EMP-ZK arithmetic proof; batch check collapses to the last mul gate; transcript leak;
+              interpolate + factor to recover the hidden multiset.
             </p>
           </div>
           <div class="writeup-meta">
@@ -47,7 +46,7 @@
             <span class="tag">handle: silent</span>
             <span class="tag">crypto</span>
             <span class="tag">zkp</span>
-            <span class="tag">lattice-free</span>
+            <span class="tag">emp-zk</span>
           </div>
         </section>
 
@@ -59,158 +58,1236 @@
                 alt="Proof of solve for LA CTF crypto/slow-gold"
                 loading="lazy"
               />
-              <figcaption>
-                Solve proof screenshot (LA CTF crypto/slow-gold).
-              </figcaption>
+              <figcaption>Solve proof screenshot.</figcaption>
             </figure>
 
-            <h3>Flag</h3>
-            <pre><code class="language-text">lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}</code></pre>
+            <h3>Downloads</h3>
+            <div class="downloads">
+<a class="dl" href="artifacts/slow-gold/solve_slowgold.py" download><span class="dl-name">solve_slowgold.py</span><span class="dl-meta">6.8 KB</span></a>
+<a class="dl" href="artifacts/slow-gold/slowgold_probe.cpp" download><span class="dl-name">slowgold_probe.cpp</span><span class="dl-meta">2.2 KB</span></a>
+<a class="dl" href="artifacts/slow-gold/slowgold_submit.cpp" download><span class="dl-name">slowgold_submit.cpp</span><span class="dl-meta">2.5 KB</span></a>
+<a class="dl" href="artifacts/slow-gold/ostriple.h" download><span class="dl-name">ostriple.h</span><span class="dl-meta">9.7 KB</span></a>
+            </div>
 
-            <h3>Key Idea (One Paragraph)</h3>
+            <h3>Full Writeup (Verbatim)</h3>
+            <details class="code" open>
+              <summary>crypto/slow-gold technical writeup</summary>
+              <pre><code class="language-text">LA CTF 2025/2026 (crypto) - slow-gold
+====================================
+
+Flag: lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}
+
+This is a full technical writeup for the challenge `crypto/slow-gold`.
+
+The key idea: the challenge uses an EMP-ZK arithmetic proof. A subtle bug in the
+library&#x27;s multiplication-gate batch check reduces a multi-gate random linear
+combination into &quot;check only the last multiplication gate&quot;, and the verifier
+can read out enough of the check transcript to recover the prover&#x27;s wire values
+as a function of the public challenge X. Those wire values are evaluations of a
+degree-9 polynomial; interpolating and factoring it yields the secret inputs,
+which can then be submitted to get the flag.
+
+
+0. Reproduction / &quot;Screenshots&quot;
+-------------------------------
+
+All commands below were executed from:
+  /home/kali/Desktop/ctf/lactf_cryptochallenges
+
+Solver transcript is saved here:
+  writeup_artifacts/slowgold_solver_transcript_2.txt
+
+Run:
+
+  python3 solve_slowgold.py
+
+Observed output (verbatim):
+
+  [X=0] a=1811319579736929840 b=1185230980869603820 v9=1185230980869603820
+  [X=1] a=1347261408062289609 b=1185230980869603821 v9=1185230980869603820
+  [X=2] a=1623470127944424535 b=1185230980869603822 v9=1185230980869603820
+  [X=3] a=1251409870297431806 b=1185230980869603823 v9=1185230980869603820
+  [X=4] a=524114117384685984 b=1185230980869603824 v9=1185230980869603820
+  [X=5] a=1334345023845748360 b=1185230980869603825 v9=1185230980869603820
+  [X=6] a=122449731357871313 b=1185230980869603826 v9=1185230980869603820
+  [X=7] a=2161881734017330867 b=1185230980869603827 v9=1185230980869603820
+  [X=8] a=683443398518365972 b=1185230980869603828 v9=1185230980869603820
+  [X=9] a=893322674715030543 b=1185230980869603829 v9=1185230980869603820
+  [v9] 1185230980869603820
+  [submit] start
+  connected
+  [submit] netio ready
+  [submit] setup done
+  [submit] zkp done
+  [submit] guesses sent
+  [submit] waiting flag...
+  [submit] flag recv
+  lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}
+
+
+1. What The Challenge Is Doing
+------------------------------
+
+The provided (patched) submission client is:
+  dist/emp-zk/test/arith/slowgold_submit.cpp
+
+The core computation is:
+
+  - The prover (ALICE) has two secret arrays:
+      array1[0..9], array2[0..9]  (field elements)
+  - The verifier (BOB, us) chooses a public challenge X and sends it.
+  - They compute:
+      acc1(X) = Π_{i=0..9} (array1[i] + X)
+      acc2(X) = Π_{i=0..9} (array2[i] + X)
+    and enforce acc1(X) == acc2(X) in zero-knowledge.
+
+In code, the &quot;only&quot; asserted relation is:
+
+  dist/emp-zk/test/arith/slowgold_submit.cpp
+    acc1 = acc1 * (array1[i] + X);
+    acc2 = acc2 * (array2[i] + X);
+    final_zero = acc1 - acc2;
+    batch_reveal_check_zero(final_zero);
+
+After the ZK proof completes, the server asks us to send 10 guesses (uint64),
+and if the guesses match the hidden values, it sends the flag.
+
+Interpretation (math):
+
+Let f1(t) = Π (array1[i] + t) and f2(t) = Π (array2[i] + t).
+They are degree-10 polynomials over a prime field. If f1(X) == f2(X) for a
+random X in a large field, then (with overwhelming probability) f1 == f2 as
+polynomials, hence the multisets {array1[i]} and {array2[i]} are equal.
+
+So there is one hidden multiset of 10 values; either array is that multiset.
+
+
+2. Field And EMP-ZK Representation
+---------------------------------
+
+The arithmetic field used here is:
+
+  PR = 2305843009213693951 = 2^61 - 1
+
+This is a Mersenne prime, used throughout EMP-ZK&#x27;s arithmetic backend.
+
+EMP-ZK stores authenticated values as &quot;IT-MAC&quot; style pairs:
+  prover holds (value, mac_share)
+  verifier holds &quot;key&quot; related to (value, mac_share) and the global delta.
+
+You do NOT need the full EMP-ZK protocol to solve the challenge; you only need
+one derived relation from the multiplication-gate batch check (next section).
+
+
+3. The Multiplication Check Bug (Root Cause)
+--------------------------------------------
+
+The probe binary is:
+  dist/emp-zk/bin/test_arith_slowgold_probe
+
+Source:
+  dist/emp-zk/test/arith/slowgold_probe.cpp
+
+It runs the same ZK circuit, but afterwards prints a JSON object that contains:
+
+  X, delta, seed, U, V, ka, kb, kc
+
+Those values are captured from a header-only scratchpad:
+  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h
+
+Specifically, on the verifier side (BOB) the library stores:
+  - delta (global MAC key, field element)
+  - seed (random coefficient used by the multiplication check)
+  - U, V (the prover&#x27;s reported check sums)
+  - ka, kb, kc (verifier-side key material for the *last* multiplication gate)
+
+Now the bug:
+
+In the arithmetic triple/check implementation, the multiplication-gate batch
+check is supposed to combine ALL multiplication gates via a random linear
+combination with coefficients chi[k] = seed^(k+1) (or similar).
+
+In this challenge build, however, the loop inside
+  FpOSTriple::andgate_correctness_check(...)
+is:
+
+  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h:351
+    for (uint32_t i = start + task_n - 1, k = 0;
+         i &lt; start + task_n;
+         ++i, ++k) {
+      ...
+      U += A0 * chi[k];
+      V += A1 * chi[k];
+    }
+
+Because `i` is an unsigned 32-bit integer, this loop executes EXACTLY ONCE:
+  - It starts at i = start + task_n - 1 (the last gate)
+  - Condition is i &lt; start + task_n, which is true for that single i
+  - It increments i to start + task_n, and then the condition becomes false
+
+Therefore, instead of summing over all multiplication gates, it only checks
+the very last multiplication gate, with coefficient chi[0].
+
+Also, chi is generated as:
+
+  dist/emp-zk/emp-zk/emp-vole/utility.h:188
+    coeff[0] = seed;
+    coeff[i] = coeff[i-1] * seed;
+
+And in `ostriple.h`, this arithmetic check uses only sz=1:
+
+  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h:346
+    uni_hash_coeff_gen(chi, seed, 1);
+
+So chi[0] = seed.
+
+Conclusion:
+
+  U = A0 * seed
+  V = A1 * seed
+
+where A0, A1 are functions of the last multiplication gate&#x27;s internal wires.
+
+That means we can compute:
+
+  A1 = V / seed  (mod PR), as long as seed != 0
+
+This is the leak. `slowgold_probe.cpp` gives us `V` and `seed`, so we can
+recover A1 for each probe run.
+
+
+4. What Is A1 And Why It Gives A Linear System
+----------------------------------------------
+
+For a multiplication gate with left input &quot;a&quot;, right input &quot;b&quot;, and output
+&quot;p = a*b&quot;, the check code computes (prover side):
+
+  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h:352-361
+    a  = HIGH64(left[i]);
+    ma = LOW64(left[i]);
+    b  = HIGH64(right[i]);
+    mb = LOW64(right[i]);
+    mc = LOW64(gateout[i]);
+
+    A0 = ma * mb
+    A1 = a*mb + b*ma - mc
+
+On the verifier side, it uses:
+
+  dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h:371-375
+    ka = LOW64(left[i]);
+    kb = LOW64(right[i]);
+    kc = LOW64(gateout[i]);
+    B  = ka*kb + kc*delta
+
+And finally enforces for the batch check:
+
+  A0 == delta*A1 + B
+
+(With the bug, this is enforced only for the last multiplication gate.)
+
+Now the crucial IT-MAC identities for verifier keys (derived from how EMP-ZK
+builds them; see `authenticated_val_input()` and `auth_compute_mul_recv()`):
+
+  ka = ma - delta*a
+  kb = mb - delta*b
+  kc = mc - delta*p
+
+Rearrange:
+  ma = ka + delta*a
+  mb = kb + delta*b
+  mc = kc + delta*p
+
+Plug those into A1:
+
+  A1 = a*(kb + delta*b) + b*(ka + delta*a) - (kc + delta*p)
+     = a*kb + b*ka + 2*delta*a*b - kc - delta*p
+
+Since p = a*b, we simplify:
+
+  A1 = a*kb + b*ka + delta*p - kc
+
+Rearrange to the exact linear relation used by the solver:
+
+  kb*a + ka*b + delta*p = A1 + kc        (mod PR)
+
+Everything on the right is observable per probe transcript:
+  - ka, kb, kc, delta, seed, V are printed by the probe
+  - A1 = V / seed (mod PR) due to the bug
+
+Unknowns for that specific run:
+  - a (left wire value of the last multiplication gate)
+  - b (right wire value of the last multiplication gate)
+  - p = a*b
+
+But note: delta is fixed per connection, while ka/kb/kc (and thus the equation)
+change per connection because the protocol uses fresh VOLE samples.
+
+
+5. Solving For (a, b) Using 3 Probe Transcripts
+------------------------------------------------
+
+Each probe run gives a single linear equation in the three unknowns:
+
+  kb*a + ka*b + delta*p = A1 + kc
+
+If we collect 3 transcripts for the same public X, we can solve the 3x3 system
+for (a, b, p) in the field PR, using modular Gaussian elimination.
+
+The solver does exactly this:
+  solve_slowgold.py: solve_linear_system_3(...)
+
+It also sanity-checks that the recovered p matches a*b:
+  (a*b) % PR == p
+
+This prevents accidental use of a singular/degenerate triple of equations.
+
+
+6. Why V9 Falls Out Immediately (b - X)
+---------------------------------------
+
+Now we interpret which gate is &quot;the last multiplication gate&quot; in the circuit.
+
+The circuit multiplies in a loop:
+
+  for i in 0..9:
+    acc1 *= (array1[i] + X)
+    acc2 *= (array2[i] + X)
+
+Within each iteration, acc2&#x27;s multiplication occurs after acc1&#x27;s multiplication.
+So the very last multiplication gate executed in the entire circuit is:
+
+  acc2 = acc2 * (array2[9] + X)
+
+Thus, for the last multiplication gate:
+  a = acc2_before = Π_{i=0..8} (array2[i] + X)
+  b = array2[9] + X
+
+Therefore:
+  array2[9] = b - X  (mod PR)
+
+The solver records v9_votes = (b - X) across X=0..9 and takes the majority vote.
+In practice it is constant and the vote just makes it robust to rare bad probes.
+
+
+7. Recovering The Other 9 Values via Polynomial Interpolation + Factoring
+-------------------------------------------------------------------------
+
+From the previous section:
+
+  a(X) = Π_{i=0..8} (array2[i] + X)
+
+This is a degree-9 polynomial in X over the field PR.
+
+If we can evaluate a(X) at 10 distinct X values, we can uniquely interpolate
+the polynomial coefficients.
+
+The solver chooses X = 0..9 and recovers a(X) using the linear-system method
+above, producing points:
+
+  (0, a0), (1, a1), ..., (9, a9)
+
+Then it performs Lagrange interpolation in the field to obtain coefficients:
+
+  P(X) = c0 + c1*X + ... + c9*X^9
+
+Implementation:
+  solve_slowgold.py: lagrange_interpolate(...)
+
+Now, factor P(X) mod PR. Since:
+
+  a(X) = Π_{i=0..8} (X + array2[i])
+
+the roots of P(X) are:
+
+  X = -array2[i]
+
+So factoring P(X) into linear factors yields all 9 roots, hence all 9 values.
+
+Implementation:
+  solve_slowgold.py: roots_from_poly(...)
+  (uses sympy Poly(..., modulus=PR) and factor_list())
+
+Finally:
+  recovered_values = { array2[0..8], array2[9] }
+
+
+8. Submitting And Getting The Flag
+----------------------------------
+
+The submission client:
+  dist/emp-zk/bin/test_arith_slowgold_submit
+
+Accepts guesses via env var:
+  SLOWGOLD_GUESSES=v0,v1,...,v9
+
+The solver runs it after computing the values. The server replies with the flag:
+
+  lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}
+
+
+9. Why This Works (Proof Sketch)
+--------------------------------
+
+There are two probabilistic arguments and two deterministic ones:
+
+(A) Deterministic: bug =&gt; single-gate check
+    The `for` loop in `ostriple.h` executes exactly once, so U and V are computed
+    from only the last gate, with coefficient seed. Therefore A1 = V/seed.
+
+(B) Deterministic: A1 + verifier keys =&gt; linear equation
+    Using the IT-MAC relation between prover MAC shares (ma,mb,mc), values (a,b),
+    product p=a*b, and verifier keys (ka,kb,kc) with delta, we derive:
+      kb*a + ka*b + delta*p = A1 + kc
+
+(C) Deterministic: last gate structure =&gt; polynomial evaluations
+    The last gate is acc2_before * (array2[9]+X), so b-X reveals array2[9], and
+    a(X) equals the degree-9 product Π_{i=0..8} (array2[i]+X).
+
+(D) Probabilistic but overwhelming: interpolation + factoring recovers roots
+    Given 10 distinct X values in a prime field, a degree-9 polynomial is uniquely
+    determined by its evaluations, so interpolation recovers the exact polynomial.
+    Factoring over a prime field yields its linear roots (the -array2[i]) since it
+    is exactly a product of distinct linear factors in the intended construction.
+
+
+10. Notes / Reliability
+-----------------------
+
+1) seed == 0:
+   If a probe transcript has seed=0, then A1 = V/seed is undefined. The solver
+   discards such rows and retries.
+
+2) Singular 3x3 systems:
+   Some triples of equations can be singular mod PR. The solver tries multiple
+   combinations of collected rows until Gaussian elimination succeeds and the
+   p == a*b consistency check passes.
+
+3) Network flakiness:
+   The probe wraps the binary with a timeout and retries; this is why the solve
+   can take several minutes end-to-end.
+
+
+Appendix: Relevant Files
+------------------------
+
+  - solve_slowgold.py
+      Full exploit + interpolation + factoring + submission.
+
+  - dist/emp-zk/test/arith/slowgold_submit.cpp
+      The original protocol: prove Π(array1[i]+X) == Π(array2[i]+X).
+
+  - dist/emp-zk/test/arith/slowgold_probe.cpp
+      A helper client that prints the check transcript JSON used by the solver.
+
+  - dist/emp-zk/emp-zk/emp-zk-arith/ostriple.h
+      Where the bugged loop lives and where last-gate values are stored.
+
+</code></pre>
+            </details>
+
+            <h3>Reference Code</h3>
             <p>
-              The challenge uses an EMP-ZK arithmetic proof. A subtle bug in the library's
-              multiplication-gate batch check collapses the multi-gate random linear
-              combination into "check only the last multiplication gate." The verifier can
-              read enough of the check transcript to recover the prover's wire values as a
-              function of the public challenge X. Those wire values are evaluations of a
-              degree-9 polynomial; interpolating and factoring it yields the secret inputs,
-              which can then be submitted to get the flag.
+              These are the exact files referenced in the writeup, included here for convenience.
             </p>
 
-            <h3>0. Reproduction</h3>
-            <p>
-              Run the solver:
-            </p>
-            <pre><code class="language-bash">python3 solve_slowgold.py</code></pre>
-            <p>
-              Example output:
-            </p>
-            <pre><code class="language-text">[X=0] a=1811319579736929840 b=1185230980869603820 v9=1185230980869603820
-[X=1] a=1347261408062289609 b=1185230980869603821 v9=1185230980869603820
-[X=2] a=1623470127944424535 b=1185230980869603822 v9=1185230980869603820
-[X=3] a=1251409870297431806 b=1185230980869603823 v9=1185230980869603820
-[X=4] a=524114117384685984 b=1185230980869603824 v9=1185230980869603820
-[X=5] a=1334345023845748360 b=1185230980869603825 v9=1185230980869603820
-[X=6] a=122449731357871313 b=1185230980869603826 v9=1185230980869603820
-[X=7] a=2161881734017330867 b=1185230980869603827 v9=1185230980869603820
-[X=8] a=683443398518365972 b=1185230980869603828 v9=1185230980869603820
-[X=9] a=893322674715030543 b=1185230980869603829 v9=1185230980869603820
-[v9] 1185230980869603820
-[submit] flag recv
-lactf{1_h0p3_y0u_l1v3_th1s_0ne_t0_th3_fullest}</code></pre>
+<details class="code">
+  <summary>solve_slowgold.py</summary>
+  <pre><code class="language-python">#!/usr/bin/env python3
+import itertools
+import json
+import os
+import subprocess
+import sys
+from collections import Counter
 
-            <h3>1. What The Challenge Is Doing</h3>
-            <p>
-              The prover (ALICE) holds two secret arrays of 10 field elements each,
-              <code>array1[0..9]</code> and <code>array2[0..9]</code>. The verifier (BOB) chooses a
-              public challenge <code>X</code>. The circuit computes:
-            </p>
-            <pre><code class="language-text">acc1(X) = Π_{i=0..9} (array1[i] + X)
-acc2(X) = Π_{i=0..9} (array2[i] + X)</code></pre>
-            <p>
-              and enforces <code>acc1(X) == acc2(X)</code> in zero-knowledge. Afterwards, the server
-              asks for 10 guesses; if they match the hidden values, it returns the flag.
-            </p>
+from sympy import Poly, symbols
 
-            <h3>2. Field And Representation</h3>
-            <p>
-              The arithmetic field is:
-            </p>
-            <pre><code class="language-text">PR = 2305843009213693951 = 2^61 - 1</code></pre>
-            <p>
-              EMP-ZK uses IT-MAC style authenticated values. You do not need the full protocol
-              to solve this; you only need the single linear relation derived from the
-              multiplication check.
-            </p>
+PR = 2305843009213693951  # 2^61 - 1
 
-            <h3>3. The Multiplication Check Bug (Root Cause)</h3>
-            <p>
-              The batch check is supposed to combine all multiplication gates using random
-              coefficients <code>chi[k]</code> derived from <code>seed</code>. In this build, the loop in
-              <code>FpOSTriple::andgate_correctness_check</code> starts at the last gate and, because
-              the index is unsigned, runs exactly once. Also, <code>chi</code> is generated with
-              length 1, so <code>chi[0] = seed</code>. Net effect:
-            </p>
-            <pre><code class="language-text">U = A0 * seed
-V = A1 * seed</code></pre>
-            <p>
-              So (when <code>seed != 0</code>) we can compute:
-            </p>
-            <pre><code class="language-text">A1 = V / seed  (mod PR)</code></pre>
-            <p>
-              The probe client prints <code>V</code> and <code>seed</code>, making <code>A1</code> recoverable per run.
-            </p>
 
-            <h3>4. What Is A1 And The Linear System</h3>
-            <p>
-              For a multiplication gate with inputs <code>a</code>, <code>b</code> and output <code>p=a*b</code>, the
-              check code defines:
-            </p>
-            <pre><code class="language-text">A0 = ma * mb
-A1 = a*mb + b*ma - mc</code></pre>
-            <p>
-              Using the IT-MAC identities for verifier keys
-              <code>ka = ma - delta*a</code>, <code>kb = mb - delta*b</code>, <code>kc = mc - delta*p</code>, we can
-              rewrite <code>A1</code> into the exact solver relation:
-            </p>
-            <pre><code class="language-text">kb*a + ka*b + delta*p = A1 + kc  (mod PR)</code></pre>
-            <p>
-              Everything on the right is observable per transcript (delta, seed, V, ka, kb, kc),
-              and <code>A1</code> is computed as <code>V/seed</code>. Unknowns for that run are <code>a</code>, <code>b</code>, <code>p</code>.
-            </p>
+def mod(x: int) -&gt; int:
+    return x % PR
 
-            <h3>5. Solve (a, b, p) With 3 Probe Transcripts</h3>
-            <p>
-              Each probe run gives one linear equation in the three unknowns. With 3 transcripts
-              for the same public <code>X</code>, you solve a 3x3 system in <code>F_PR</code> via modular Gaussian
-              elimination, then sanity-check that <code>p == a*b</code>.
-            </p>
 
-            <h3>6. Why v9 Falls Out Immediately</h3>
-            <p>
-              The last multiplication gate in the circuit is the final update of <code>acc2</code>:
-            </p>
-            <pre><code class="language-text">acc2 = acc2 * (array2[9] + X)</code></pre>
-            <p>
-              Therefore, for the last gate:
-            </p>
-            <pre><code class="language-text">a(X) = Π_{i=0..8} (array2[i] + X)
-b(X) = array2[9] + X</code></pre>
-            <p>
-              So <code>array2[9] = b(X) - X</code> (mod PR). In practice this is constant across X=0..9.
-            </p>
+def inv(x: int) -&gt; int:
+    x %= PR
+    if x == 0:
+        raise ZeroDivisionError(&quot;inv(0)&quot;)
+    return pow(x, PR - 2, PR)
 
-            <h3>7. Recover The Other 9 Values</h3>
-            <p>
-              Since <code>a(X)</code> is a degree-9 polynomial, 10 distinct evaluations uniquely determine
-              it. Interpolate from X=0..9 to get <code>P(X)</code>, then factor it mod PR:
-            </p>
-            <pre><code class="language-text">P(X) = Π_{i=0..8} (X + array2[i])</code></pre>
-            <p>
-              The roots are <code>X = -array2[i]</code>, yielding the remaining 9 values.
-            </p>
 
-            <h3>8. Submission</h3>
-            <p>
-              The submission client accepts guesses via:
-            </p>
-            <pre><code class="language-text">SLOWGOLD_GUESSES=v0,v1,...,v9</code></pre>
+def run_probe(x: int) -&gt; dict:
+    env = os.environ.copy()
+    env[&quot;SLOWGOLD_X&quot;] = str(x)
+    # Probe prints &quot;connected&quot; then one JSON line. Network/service can be flaky,
+    # so retry a few times and extract the last JSON-looking line.
+    for _ in range(6):
+        try:
+            out = subprocess.check_output(
+                [&quot;bash&quot;, &quot;-lc&quot;, &quot;timeout 420s dist/emp-zk/bin/test_arith_slowgold_probe&quot;],
+                env=env,
+                text=True,
+                stderr=subprocess.STDOUT,
+            )
+        except subprocess.CalledProcessError as e:
+            out = e.output or &quot;&quot;
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip().startswith(&quot;{&quot;)]
+        if lines:
+            return json.loads(lines[-1])
+    raise RuntimeError(f&quot;probe failed for X={x}&quot;)
 
-            <h3>9. Reliability Notes</h3>
-            <ul>
-              <li><strong>seed == 0:</strong> discard that transcript and retry.</li>
-              <li><strong>singular 3x3 systems:</strong> try different triples until elimination succeeds and p == a*b.</li>
-              <li><strong>network flakiness:</strong> wrap probes with timeouts and retry.</li>
-            </ul>
 
-            <h3>Appendix</h3>
-            <ul>
-              <li><code>solve_slowgold.py</code>: exploit + interpolation + factoring + submission</li>
-              <li><code>slowgold_submit.cpp</code>: circuit definition</li>
-              <li><code>slowgold_probe.cpp</code>: prints transcript JSON</li>
-              <li><code>ostriple.h</code>: bugged loop and last-gate scratchpad</li>
-            </ul>
+def a1_from_row(r: dict) -&gt; int:
+    seed = r[&quot;seed&quot;] % PR
+    if seed == 0:
+        raise ZeroDivisionError(&quot;seed=0&quot;)
+    # V = seed * A1 for the last multiplication gate (due to a bug in the check loop).
+    return (r[&quot;V&quot;] % PR) * inv(seed) % PR
+
+
+def solve_linear_system_3(rows: list[dict]) -&gt; tuple[int, int, int]:
+    # kb*a + ka*b + delta*p = A1 + kc
+    M = []
+    rhs = []
+    for r in rows:
+        A1 = a1_from_row(r)
+        M.append([r[&quot;kb&quot;] % PR, r[&quot;ka&quot;] % PR, r[&quot;delta&quot;] % PR])
+        rhs.append((A1 + (r[&quot;kc&quot;] % PR)) % PR)
+
+    # Gaussian elimination for 3x3.
+    M = [row[:] for row in M]
+    rhs = rhs[:]
+    n = 3
+    for col in range(n):
+        piv = None
+        for i in range(col, n):
+            if M[i][col] % PR != 0:
+                piv = i
+                break
+        if piv is None:
+            raise ValueError(&quot;singular&quot;)
+        if piv != col:
+            M[col], M[piv] = M[piv], M[col]
+            rhs[col], rhs[piv] = rhs[piv], rhs[col]
+        invp = inv(M[col][col])
+        for j in range(col, n):
+            M[col][j] = (M[col][j] * invp) % PR
+        rhs[col] = (rhs[col] * invp) % PR
+        for i in range(n):
+            if i == col:
+                continue
+            factor = M[i][col] % PR
+            if factor == 0:
+                continue
+            for j in range(col, n):
+                M[i][j] = (M[i][j] - factor * M[col][j]) % PR
+            rhs[i] = (rhs[i] - factor * rhs[col]) % PR
+
+    a, b, p = rhs
+    if (a * b) % PR != p:
+        raise ValueError(&quot;inconsistent: p != a*b&quot;)
+    return a, b, p
+
+
+def solve_a_b_for_X(x: int, max_tries: int = 8) -&gt; tuple[int, int]:
+    rows = []
+    for _ in range(max_tries):
+        r = run_probe(x)
+        # Drop degenerate seeds early.
+        if (r[&quot;seed&quot;] % PR) == 0:
+            continue
+        rows.append(r)
+        if len(rows) &lt; 3:
+            continue
+        # Try all 3-subsets until one inverts.
+        for comb in itertools.combinations(rows, 3):
+            try:
+                a, b, _p = solve_linear_system_3(list(comb))
+                return a, b
+            except Exception:
+                pass
+    raise RuntimeError(f&quot;failed to solve for X={x} after {max_tries} probes&quot;)
+
+
+def poly_add(a: list[int], b: list[int]) -&gt; list[int]:
+    n = max(len(a), len(b))
+    out = [0] * n
+    for i in range(n):
+        out[i] = ( (a[i] if i &lt; len(a) else 0) + (b[i] if i &lt; len(b) else 0) ) % PR
+    # trim
+    while len(out) &gt; 1 and out[-1] == 0:
+        out.pop()
+    return out
+
+
+def poly_mul(a: list[int], b: list[int]) -&gt; list[int]:
+    out = [0] * (len(a) + len(b) - 1)
+    for i, ai in enumerate(a):
+        if ai == 0:
+            continue
+        for j, bj in enumerate(b):
+            out[i + j] = (out[i + j] + ai * bj) % PR
+    while len(out) &gt; 1 and out[-1] == 0:
+        out.pop()
+    return out
+
+
+def lagrange_interpolate(xs: list[int], ys: list[int]) -&gt; list[int]:
+    # Returns coeffs c0..c_{n-1} for degree &lt;= n-1 polynomial with f(xs[i])=ys[i].
+    n = len(xs)
+    assert n == len(ys)
+    coeffs = [0]
+    for i in range(n):
+        xi = xs[i] % PR
+        yi = ys[i] % PR
+        # basis numerator: prod_{j!=i} (x - xj)
+        num = [1]  # poly = 1
+        den = 1
+        for j in range(n):
+            if i == j:
+                continue
+            xj = xs[j] % PR
+            num = poly_mul(num, [(-xj) % PR, 1])  # (x - xj)
+            den = (den * ((xi - xj) % PR)) % PR
+        scale = (yi * inv(den)) % PR
+        term = [(c * scale) % PR for c in num]
+        coeffs = poly_add(coeffs, term)
+    # pad to n
+    coeffs += [0] * (n - len(coeffs))
+    return [c % PR for c in coeffs[:n]]
+
+
+def roots_from_poly(coeffs: list[int]) -&gt; list[int]:
+    x = symbols(&quot;x&quot;)
+    expr = 0
+    for i, c in enumerate(coeffs):
+        expr = (expr + int(c) * (x ** i))
+    P = Poly(expr, x, modulus=PR)
+    lc = int(P.LC()) % PR
+    if lc != 1:
+        P = Poly(P * inv(lc), x, modulus=PR)
+
+    factors = P.factor_list()[1]
+    roots = []
+    for f, e in factors:
+        if f.degree() != 1:
+            raise RuntimeError(f&quot;unexpected non-linear factor: deg={f.degree()}&quot;)
+        a1, a0 = [int(c) % PR for c in f.all_coeffs()]  # a1*x + a0
+        r = (-a0 * inv(a1)) % PR
+        roots.extend([r] * e)
+    if len(roots) != 9:
+        raise RuntimeError(f&quot;expected 9 roots, got {len(roots)}&quot;)
+    return roots
+
+
+def submit(values: list[int]) -&gt; str:
+    env = os.environ.copy()
+    env[&quot;SLOWGOLD_GUESSES&quot;] = &quot;,&quot;.join(str(int(v)) for v in values)
+    env[&quot;SLOWGOLD_X&quot;] = &quot;0&quot;
+    out = subprocess.check_output(
+        [&quot;bash&quot;, &quot;-lc&quot;, &quot;timeout 240s dist/emp-zk/bin/test_arith_slowgold_submit&quot;],
+        env=env,
+        text=True,
+        stderr=subprocess.STDOUT,
+    )
+    return out
+
+
+def main() -&gt; int:
+    # 10 points to interpolate a degree-9 polynomial a(X) = prod_{j=0..8} (v_j + X).
+    xs = list(range(10))
+    ays = []
+    v9_votes = []
+
+    for x in xs:
+        a, b = solve_a_b_for_X(x)
+        ays.append(a)
+        v9_votes.append((b - x) % PR)
+        print(f&quot;[X={x}] a={a} b={b} v9={v9_votes[-1]}&quot;, file=sys.stderr, flush=True)
+
+    v9 = Counter(v9_votes).most_common(1)[0][0]
+    print(f&quot;[v9] {v9}&quot;, file=sys.stderr, flush=True)
+
+    coeffs = lagrange_interpolate(xs, ays)  # c0..c9
+    roots = roots_from_poly(coeffs)  # roots are X = -v_j
+    v_list = [(-r) % PR for r in roots]
+    if v9 in v_list:
+        # Rare, but handle duplicates gracefully.
+        pass
+    v_list.append(v9)
+
+    # Sanity: 10 values.
+    if len(v_list) != 10:
+        raise RuntimeError(&quot;expected 10 values&quot;)
+
+    # Submit. Any order is fine (server checks permutation).
+    out = submit(v_list)
+    sys.stdout.write(out)
+    if &quot;lactf{&quot; in out:
+        return 0
+    return 1
+
+
+if __name__ == &quot;__main__&quot;:
+    raise SystemExit(main())
+</code></pre>
+</details>
+
+<details class="code">
+  <summary>slowgold_probe.cpp</summary>
+  <pre><code class="language-cpp">#include &quot;emp-tool/emp-tool.h&quot;
+#include &quot;emp-zk/emp-zk.h&quot;
+
+#include &lt;cinttypes&gt;
+#include &lt;cstdlib&gt;
+#include &lt;iostream&gt;
+#include &lt;vector&gt;
+
+using namespace emp;
+using namespace std;
+
+static constexpr int threads = 1;
+
+int main(int argc, char **argv) {
+  (void)argc;
+  (void)argv;
+
+  int party = BOB;
+  const char *host = getenv(&quot;SLOWGOLD_HOST&quot;);
+  if (!host)
+    // NetIO uses inet_addr() and does not resolve hostnames.
+    host = &quot;34.169.138.235&quot;;
+  int port = 31183;
+
+  uint64_t X = 0;
+  if (const char *xs = getenv(&quot;SLOWGOLD_X&quot;)) {
+    X = strtoull(xs, nullptr, 0);
+  } else {
+    // Fallback: read from stdin like the original client.
+    cin &gt;&gt; X;
+  }
+
+  BoolIO&lt;NetIO&gt; *ios[threads];
+  for (int i = 0; i &lt; threads; ++i) {
+    ios[i] = new BoolIO&lt;NetIO&gt;(new NetIO(party == ALICE ? nullptr : host, port),
+                              party == ALICE);
+  }
+
+  setup_zk_arith&lt;BoolIO&lt;NetIO&gt;&gt;(ios, threads, party);
+
+  vector&lt;IntFp&gt; array1, array2;
+  for (int i = 0; i &lt; 10; i++) {
+    array1.push_back(IntFp(0, ALICE));
+    array2.push_back(IntFp(0, ALICE));
+  }
+
+  // Send X as a public challenge.
+  ZKFpExec::zk_exec-&gt;send_data(&amp;X, sizeof(uint64_t));
+
+  IntFp acc1 = IntFp(1, PUBLIC);
+  IntFp acc2 = IntFp(1, PUBLIC);
+  for (int i = 0; i &lt; 10; i++) {
+    acc1 = acc1 * (array1[i] + X);
+    acc2 = acc2 * (array2[i] + X);
+  }
+  IntFp final_zero = acc1 + acc2.negate();
+  batch_reveal_check_zero(&amp;final_zero, 1);
+
+  finalize_zk_arith&lt;BoolIO&lt;NetIO&gt;&gt;();
+
+  // Emit the pieces we need for the offline solver.
+  const uint64_t delta = slowgold_last_delta_u64();
+  const uint64_t seed = slowgold_last_mulcheck_seed();
+  const uint64_t U = slowgold_last_mulcheck_U();
+  const uint64_t V = slowgold_last_mulcheck_V();
+  const uint64_t ka = slowgold_last_mulcheck_ka();
+  const uint64_t kb = slowgold_last_mulcheck_kb();
+  const uint64_t kc = slowgold_last_mulcheck_kc();
+
+  // One JSON line; stable to parse.
+  cout &lt;&lt; &quot;{&quot;
+       &lt;&lt; &quot;\&quot;X\&quot;:&quot; &lt;&lt; X &lt;&lt; &quot;,&quot;
+       &lt;&lt; &quot;\&quot;delta\&quot;:&quot; &lt;&lt; delta &lt;&lt; &quot;,&quot;
+       &lt;&lt; &quot;\&quot;seed\&quot;:&quot; &lt;&lt; seed &lt;&lt; &quot;,&quot;
+       &lt;&lt; &quot;\&quot;U\&quot;:&quot; &lt;&lt; U &lt;&lt; &quot;,&quot;
+       &lt;&lt; &quot;\&quot;V\&quot;:&quot; &lt;&lt; V &lt;&lt; &quot;,&quot;
+       &lt;&lt; &quot;\&quot;ka\&quot;:&quot; &lt;&lt; ka &lt;&lt; &quot;,&quot;
+       &lt;&lt; &quot;\&quot;kb\&quot;:&quot; &lt;&lt; kb &lt;&lt; &quot;,&quot;
+       &lt;&lt; &quot;\&quot;kc\&quot;:&quot; &lt;&lt; kc &lt;&lt; &quot;}&quot;
+       &lt;&lt; &quot;\n&quot;;
+
+  for (int i = 0; i &lt; threads; ++i) {
+    delete ios[i]-&gt;io;
+    delete ios[i];
+  }
+  return 0;
+}
+</code></pre>
+</details>
+
+<details class="code">
+  <summary>slowgold_submit.cpp</summary>
+  <pre><code class="language-cpp">#include &quot;emp-tool/emp-tool.h&quot;
+#include &quot;emp-zk/emp-zk.h&quot;
+
+#include &lt;cstdlib&gt;
+#include &lt;iostream&gt;
+#include &lt;sstream&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+
+using namespace emp;
+using namespace std;
+
+static constexpr int threads = 1;
+
+static vector&lt;uint64_t&gt; parse_u64_csv(const string &amp;s) {
+  vector&lt;uint64_t&gt; out;
+  string item;
+  stringstream ss(s);
+  while (getline(ss, item, &#x27;,&#x27;)) {
+    if (item.empty())
+      continue;
+    out.push_back(strtoull(item.c_str(), nullptr, 0));
+  }
+  return out;
+}
+
+int main(int argc, char **argv) {
+  (void)argc;
+  (void)argv;
+
+  cerr &lt;&lt; &quot;[submit] start\n&quot; &lt;&lt; flush;
+
+  const char *gs = getenv(&quot;SLOWGOLD_GUESSES&quot;);
+  if (!gs) {
+    cerr &lt;&lt; &quot;need SLOWGOLD_GUESSES=comma,separated,10,values\n&quot;;
+    return 2;
+  }
+  vector&lt;uint64_t&gt; guesses = parse_u64_csv(gs);
+  if (guesses.size() != 10) {
+    cerr &lt;&lt; &quot;need exactly 10 guesses, got &quot; &lt;&lt; guesses.size() &lt;&lt; &quot;\n&quot;;
+    return 2;
+  }
+
+  uint64_t X = 0;
+  if (const char *xs = getenv(&quot;SLOWGOLD_X&quot;)) {
+    X = strtoull(xs, nullptr, 0);
+  }
+
+  int party = BOB;
+  const char *host = getenv(&quot;SLOWGOLD_HOST&quot;);
+  if (!host)
+    host = &quot;34.169.138.235&quot;;
+  int port = 31183;
+
+  BoolIO&lt;NetIO&gt; *ios[threads];
+  for (int i = 0; i &lt; threads; ++i) {
+    ios[i] = new BoolIO&lt;NetIO&gt;(new NetIO(party == ALICE ? nullptr : host, port),
+                              party == ALICE);
+  }
+  cerr &lt;&lt; &quot;[submit] netio ready\n&quot; &lt;&lt; flush;
+
+  setup_zk_arith&lt;BoolIO&lt;NetIO&gt;&gt;(ios, threads, party);
+  cerr &lt;&lt; &quot;[submit] setup done\n&quot; &lt;&lt; flush;
+
+  vector&lt;IntFp&gt; array1, array2;
+  for (int i = 0; i &lt; 10; i++) {
+    array1.push_back(IntFp(0, ALICE));
+    array2.push_back(IntFp(0, ALICE));
+  }
+
+  ZKFpExec::zk_exec-&gt;send_data(&amp;X, sizeof(uint64_t));
+
+  IntFp acc1 = IntFp(1, PUBLIC);
+  IntFp acc2 = IntFp(1, PUBLIC);
+  for (int i = 0; i &lt; 10; i++) {
+    acc1 = acc1 * (array1[i] + X);
+    acc2 = acc2 * (array2[i] + X);
+  }
+  IntFp final_zero = acc1 + acc2.negate();
+  batch_reveal_check_zero(&amp;final_zero, 1);
+
+  finalize_zk_arith&lt;BoolIO&lt;NetIO&gt;&gt;();
+  cerr &lt;&lt; &quot;[submit] zkp done\n&quot; &lt;&lt; flush;
+
+  for (int i = 0; i &lt; 10; i++) {
+    uint64_t g = guesses[i];
+    ios[0]-&gt;io-&gt;send_data(&amp;g, sizeof(uint64_t));
+  }
+  cerr &lt;&lt; &quot;[submit] guesses sent\n&quot; &lt;&lt; flush;
+
+  // Flag is always exactly 46 bytes in the challenge.
+  string flag;
+  flag.resize(46);
+  cerr &lt;&lt; &quot;[submit] waiting flag...\n&quot; &lt;&lt; flush;
+  ios[0]-&gt;io-&gt;recv_data(&amp;flag[0], 46);
+  cerr &lt;&lt; &quot;[submit] flag recv\n&quot; &lt;&lt; flush;
+  cout &lt;&lt; flag;
+
+  for (int i = 0; i &lt; threads; ++i) {
+    delete ios[i]-&gt;io;
+    delete ios[i];
+  }
+  return 0;
+}
+</code></pre>
+</details>
+
+<details class="code">
+  <summary>ostriple.h</summary>
+  <pre><code class="language-cpp">#ifndef OS_TRIPLE_H__
+#define OS_TRIPLE_H__
+
+#include &quot;emp-ot/emp-ot.h&quot;
+#include &quot;emp-zk/emp-zk-bool/bool_io.h&quot;
+#include &quot;emp-zk/emp-zk-bool/cheat_record.h&quot;
+#include &quot;emp-zk/emp-zk-bool/triple_auth.h&quot;
+
+template &lt;typename IO&gt; class OSTriple {
+public:
+  int party, threads;
+  block delta;
+
+  // managing buffers storing COTs
+  int check_cnt = 0;
+  block *andgate_out_buffer = nullptr;
+  block *andgate_left_buffer = nullptr;
+  block *andgate_right_buffer = nullptr;
+
+  GaloisFieldPacking pack;
+  int64_t CHECK_SZ = 1024 * 1024;
+
+  block choice[2], choice2[2];
+  block minusone, one;
+  IO *io;
+  IO **ios;
+  PRG prg;
+  FerretCOT&lt;IO&gt; *ferret = nullptr;
+  TripleAuth&lt;IO&gt; *auth_helper;
+  ThreadPool *pool = nullptr;
+  void *ferret_state = nullptr;
+
+  OSTriple(int party, int threads, IO **ios, void *state = nullptr) {
+    this-&gt;party = party;
+    this-&gt;threads = threads;
+    this-&gt;ferret_state = state;
+    // initiate Iterative COT with regular noise and security against malicious
+    // adv
+    if (ferret_state == nullptr)
+      ferret = new FerretCOT&lt;IO&gt;(3 - party, threads, ios, true);
+    else {
+      ferret = new FerretCOT&lt;IO&gt;(3 - party, threads, ios, true, false);
+      ferret-&gt;disassemble_state(ferret_state, 10400000);
+    }
+    this-&gt;delta = ferret-&gt;Delta;
+    io = ios[0];
+    this-&gt;ios = ios;
+    pool = new ThreadPool(threads);
+
+    andgate_out_buffer = new block[CHECK_SZ];
+    andgate_left_buffer = new block[CHECK_SZ];
+    andgate_right_buffer = new block[CHECK_SZ];
+
+    block tmp;
+    ferret-&gt;rcot(&amp;tmp, 1);
+
+    choice[0] = choice2[0] = zero_block;
+    choice[1] = this-&gt;delta;
+    minusone = makeBlock(0xFFFFFFFFFFFFFFFFLL, 0xFFFFFFFFFFFFFFFELL);
+    one = makeBlock(0x0L, 0x1L);
+    choice2[1] = one;
+
+    auth_helper = new TripleAuth&lt;IO&gt;(party, io);
+    if (party == BOB)
+      auth_helper-&gt;set_delta(this-&gt;delta);
+  }
+
+  ~OSTriple() {
+    if (check_cnt != 0) {
+      andgate_correctness_check_manage();
+    }
+    if (!auth_helper-&gt;finalize())
+      CheatRecord::put(&quot;emp-zk-bool finalize&quot;);
+    if (ferret_state != nullptr)
+      ferret-&gt;assemble_state(ferret_state, 10400000);
+    delete ferret;
+    delete[] andgate_out_buffer;
+    delete[] andgate_left_buffer;
+    delete[] andgate_right_buffer;
+    delete auth_helper;
+    delete pool;
+  }
+
+  uint64_t communication() {
+    uint64_t res = 0;
+    for (int i = 0; i &lt; threads; ++i)
+      res += ios[i]-&gt;counter;
+    return res;
+  }
+
+  /* ---------------------inputs----------------------*/
+  /*
+   * authenticated bits for inputs of the prover
+   */
+  void authenticated_bits_input(block *auth, const bool *in, int len) {
+    ferret-&gt;rcot(auth, len);
+
+    if (party == ALICE) {
+      for (int i = 0; i &lt; len; ++i) {
+        bool buff = getLSB(auth[i]) ^ in[i];
+        set_value_in_block(auth[i], in[i]);
+        io-&gt;send_bit(buff);
+      }
+    } else {
+      for (int i = 0; i &lt; len; ++i) {
+        bool buff = io-&gt;recv_bit();
+        auth[i] = auth[i] ^ choice[buff];
+        set_zero_bit(auth[i]);
+      }
+    }
+  }
+
+  /*
+   * authenticated bits for computing AND gates
+   */
+  block auth_compute_and(block a, block b) {
+    block auth;
+    if (check_cnt == CHECK_SZ) {
+      andgate_correctness_check_manage();
+      check_cnt = 0;
+    }
+
+    ferret-&gt;rcot(&amp;auth, 1);
+    andgate_left_buffer[check_cnt] = a;
+    andgate_right_buffer[check_cnt] = b;
+
+    if (party == ALICE) {
+      bool s = getLSB(a) and getLSB(b);
+      bool d = s ^ getLSB(auth);
+      set_value_in_block(auth, s);
+      io-&gt;send_bit(d);
+    } else {
+      bool d = io-&gt;recv_bit();
+      auth = auth ^ choice[d];
+      set_zero_bit(auth);
+    }
+    andgate_out_buffer[check_cnt] = auth;
+    check_cnt++;
+    return auth;
+  }
+
+  /* ---------------------check----------------------*/
+
+  void andgate_correctness_check_manage() {
+    io-&gt;flush();
+    block seed = io-&gt;get_hash_block();
+    vector&lt;future&lt;void&gt;&gt; fut;
+
+    int share_seed_n = threads;
+    block *share_seed = new block[share_seed_n];
+    PRG(&amp;seed).random_block(share_seed, share_seed_n);
+
+    uint32_t task_base = check_cnt / threads;
+    uint32_t leftover = task_base + (check_cnt % task_base);
+    uint32_t start = 0;
+    block *sum = new block[2 * threads];
+    for (int i = 0; i &lt; threads - 1; ++i) {
+      fut.push_back(
+          pool-&gt;enqueue([this, sum, i, start, task_base, share_seed]() {
+            andgate_correctness_check(sum, i, start, task_base, share_seed[i]);
+          }));
+      start += task_base;
+    }
+    andgate_correctness_check(sum, threads - 1, start, leftover,
+                              share_seed[threads - 1]);
+
+    for (auto &amp;f : fut)
+      f.get();
+
+    if (party == ALICE) {
+      block ope_data[128];
+      ferret-&gt;rcot(ope_data, 128);
+      uint64_t ch_bits[2];
+      for (int i = 0; i &lt; 2; ++i) {
+        if (getLSB(ope_data[64 * i + 63]))
+          ch_bits[i] = 1;
+        else
+          ch_bits[i] = 0;
+        for (int j = 62; j &gt;= 0; --j) {
+          ch_bits[i] &lt;&lt;= 1;
+          if (getLSB(ope_data[64 * i + j]))
+            ch_bits[i]++;
+        }
+      }
+      block A_star[2];
+      A_star[1] = makeBlock(ch_bits[1], ch_bits[0]);
+      pack.packing(A_star, ope_data);
+      for (int i = 0; i &lt; threads; ++i) {
+        A_star[0] = A_star[0] ^ sum[2 * i];
+        A_star[1] = A_star[1] ^ sum[2 * i + 1];
+      }
+      io-&gt;send_data(A_star, 2 * sizeof(block));
+    } else {
+      block ope_data[128];
+      ferret-&gt;rcot(ope_data, 128);
+      block B_star;
+      pack.packing(&amp;B_star, ope_data);
+      for (int i = 0; i &lt; threads; ++i)
+        B_star = B_star ^ sum[i];
+      block A_star[2];
+      io-&gt;recv_data(A_star, 2 * sizeof(block));
+      block W;
+      gfmul(A_star[1], this-&gt;delta, &amp;W);
+      W = W ^ A_star[0];
+      if (cmpBlock(&amp;W, &amp;B_star, 1) != 1)
+        CheatRecord::put(&quot;emp_zk_bool AND batch check&quot;);
+    }
+    io-&gt;flush();
+    delete[] share_seed;
+    delete[] sum;
+  }
+
+  void andgate_correctness_check(block *ret, int thr_i, uint32_t start,
+                                 uint32_t task_n, block chi_seed) {
+    if (task_n == 0)
+      return;
+    block *left = andgate_left_buffer;
+    block *right = andgate_right_buffer;
+    block *gateout = andgate_out_buffer;
+
+    if (party == ALICE) {
+      block ch_tmp[2];
+      ch_tmp[0] = zero_block;
+      for (uint32_t i = start; i &lt; start + task_n; ++i) {
+        block A0, A1;
+        gfmul(left[i], right[i], &amp;A0);
+        ch_tmp[1] = right[i];
+        A1 = ch_tmp[getLSB(left[i])];
+        ch_tmp[1] = left[i];
+        A1 = A1 ^ ch_tmp[getLSB(right[i])];
+        A1 = A1 ^ gateout[i];
+        left[i] = A0;
+        right[i] = A1;
+      }
+    } else {
+      for (uint32_t i = start; i &lt; start + task_n; ++i) {
+        block B;
+        gfmul(left[i], right[i], &amp;B);
+        block tmp;
+        gfmul(gateout[i], this-&gt;delta, &amp;tmp);
+        B = B ^ tmp;
+        left[i] = B;
+      }
+    }
+
+    block *chi = new block[task_n];
+    uni_hash_coeff_gen(chi, chi_seed, task_n);
+    if (party == ALICE) {
+      vector_inn_prdt_sum_red(ret + 2 * thr_i, chi, left + start, task_n);
+      vector_inn_prdt_sum_red(ret + 2 * thr_i + 1, chi, right + start, task_n);
+    } else
+      vector_inn_prdt_sum_red(ret + thr_i, chi, left + start, task_n);
+
+    delete[] chi;
+  }
+
+  /*
+   * verify the output
+   * open and check if the value equals 1
+   */
+  void verify_output(bool *b, const block *output, int length) {
+    for (int i = 0; i &lt; length; ++i) {
+      if (party == ALICE) {
+        b[i] = getLSB(output[i]);
+        io-&gt;send_bit(b[i]);
+      } else {
+        b[i] = io-&gt;recv_bit();
+      }
+    }
+    if (party == ALICE) {
+      auth_helper-&gt;prv_check(b, output, length);
+    } else
+      auth_helper-&gt;ver_check(b, output, length);
+  }
+
+  /* ---------------------helper functions----------------------*/
+  void set_zero_bit(block &amp;b) { b = b &amp; minusone; }
+
+  void set_value_in_block(block &amp;b, bool v) {
+    b = b &amp; minusone;
+    b = b ^ choice2[v];
+  }
+
+  void sync() {
+    io-&gt;flush();
+    for (int i = 0; i &lt; threads; ++i) {
+      ios[i]-&gt;flush();
+    }
+  }
+
+  /* ---------------------debug functions----------------------*/
+
+  void check_auth_mac(block *auth, bool *in, int len, IO *tio) {
+    if (party == ALICE) {
+      tio-&gt;send_data(auth, len * sizeof(block));
+      tio-&gt;send_data(in, len * sizeof(bool));
+    } else {
+      block *auth_recv = new block[len];
+      tio-&gt;recv_data(auth_recv, len * sizeof(block));
+      tio-&gt;recv_data(in, len * sizeof(bool));
+      for (int i = 0; i &lt; len; ++i) {
+        if (in[i] != getLSB(auth_recv[i]))
+          error(&quot;check1&quot;);
+        set_zero_bit(auth[i]);
+        block mac = auth[i] ^ choice[in[i]];
+        if (!cmpBlock(&amp;mac, &amp;auth_recv[i], 1))
+          error(&quot;check2&quot;);
+      }
+      delete[] auth_recv;
+    }
+  }
+  void check_compute_and(block *a, block *b, block *c, int len, IO *tio) {
+    if (party == ALICE) {
+      tio-&gt;send_data(a, len * sizeof(block));
+      tio-&gt;send_data(b, len * sizeof(block));
+      tio-&gt;send_data(c, len * sizeof(block));
+    } else {
+      block *recv = new block[3 * len];
+      tio-&gt;recv_data(recv, len * sizeof(block));
+      tio-&gt;recv_data(recv + len, len * sizeof(block));
+      tio-&gt;recv_data(recv + 2 * len, len * sizeof(block));
+      for (int i = 0; i &lt; len; ++i) {
+        bool ar = getLSB(recv[i]);
+        bool br = getLSB(recv[len + i]);
+        bool cr = getLSB(recv[2 * len + i]);
+        if (cr != (ar &amp; br))
+          error(&quot;check3&quot;);
+        block v[3];
+        v[0] = a[i];
+        v[1] = b[i];
+        v[2] = c[i];
+        set_zero_bit(v[0]);
+        set_zero_bit(v[1]);
+        set_zero_bit(v[2]);
+        v[0] = v[0] ^ choice[ar];
+        v[1] = v[1] ^ choice[br];
+        v[2] = v[2] ^ choice[cr];
+        if (!cmpBlock(v, recv + i, 1))
+          error(&quot;check4&quot;);
+        if (!cmpBlock(v + 1, recv + len + i, 1))
+          error(&quot;check5&quot;);
+        if (!cmpBlock(v + 2, recv + 2 * len + i, 1))
+          error(&quot;check6&quot;);
+      }
+      delete[] recv;
+    }
+  }
+};
+#endif
+</code></pre>
+</details>
           </div>
         </section>
 
@@ -220,7 +1297,7 @@ b(X) = array2[9] + X</code></pre>
       </main>
 
       <footer class="footer">
-        <p>© <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
+        <p>(c) <span id="year"></span> Axiom Vale. Built for GitHub Pages.</p>
       </footer>
     </div>
     <script>

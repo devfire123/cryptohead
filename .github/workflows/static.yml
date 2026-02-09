@@ -24,6 +24,10 @@ concurrency:
 jobs:
   # Single deploy job since we're just deploying
   deploy:
+    env:
+      # Re-running a job can leave multiple same-named artifacts in a single workflow run.
+      # Use a unique artifact name per run attempt so deploy-pages can resolve it unambiguously.
+      PAGES_ARTIFACT_NAME: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -38,6 +42,9 @@ jobs:
         with:
           # Upload entire repository
           path: '.'
+          name: ${{ env.PAGES_ARTIFACT_NAME }}
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: ${{ env.PAGES_ARTIFACT_NAME }}
